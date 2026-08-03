@@ -1,0 +1,49 @@
+// Expressions.
+X( ImplicitCast )
+X( Cast )
+X( Identifier )
+X( This )
+X( IntLiteral )
+X( FloatLiteral )
+X( BoolLiteral )
+X( StringLiteral )
+X( NullLiteral )
+X( FormatString )
+X( NewObject )
+X( FunctionCall )
+X( IndexCall )
+X( MemberAccess )
+X( ModuleAccess )
+X( UnaryOp )
+X( BinaryOp )
+X( TernaryExpr )
+
+// Statements.
+X( EmptyStatement )
+X( BlockStatement )
+X( ExpressionStatement )
+X( AssignmentStatement )
+X( VariableDeclarationStatement )
+X( FunctionDeclarationStatement )
+X( TypeDeclarationStatement )
+X( ImportDeclarationStatement )
+X( IfBranchStatement )
+X( IfStatement )
+X( ForStatement )
+X( WhileStatement )
+X( SwitchSectionStatement )
+X( SwitchStatement )
+X( ReturnStatement )
+X( BreakStatement )
+X( ContinueStatement )
+X( PrintStatement )
+
+// Parameters.
+X( ParamDeclaration )
+
+// Type specifiers.
+X( NamedTypeSpecifier )
+X( SubstitutedTypeSpecifier )
+
+// Misc.
+X( TranslationUnit )

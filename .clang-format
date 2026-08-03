@@ -1,0 +1,61 @@
+# --- base / general ---
+Standard: c++17
+BasedOnStyle: LLVM
+Language: Cpp
+DisableFormat: false
+
+# --- indentation & layout ---
+IndentWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: None
+BreakBeforeBraces: Allman
+InsertBraces: true
+IndentPPDirectives: BeforeHash
+
+# --- line length / breaking ---
+ColumnLimit: 120
+MaxEmptyLinesToKeep: 1
+BreakAfterReturnType: ExceptShortType
+PenaltyReturnTypeOnItsOwnLine: 1000000
+AlwaysBreakTemplateDeclarations: Yes
+BreakConstructorInitializers: BeforeComma
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortLambdasOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: true
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# --- alignment ---
+AlignArrayOfStructures: Left
+AlignEscapedNewlines: DontAlign
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 2
+AlignConsecutiveAssignments: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Left
+DerivePointerAlignment: false
+
+# --- spacing ---
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeParens: ControlStatements
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: -1
+
+# --- includes ---
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '([-_](test|unittest))?$'
+IncludeCategories:
+  - Regex: '^<.*>'
+    Priority: 1
+  - Regex: '^".*"'
+    Priority: 2
+SortUsingDeclarations: true

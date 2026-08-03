@@ -1,0 +1,78 @@
+# Build directories
+/build/
+/out/
+/cmake-build-*/
+[Dd]ebug/
+[Rr]elease/
+[Rr]eleases/
+[Bb]in/
+[Oo]bj/
+x64/
+x86/
+
+# CMake/Ninja generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+CTestTestfile.cmake
+CMakeLists.txt.user
+CMakeUserPresets.json
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+_deps/
+*-prefix/
+
+# C/C++ build artifacts
+*.a
+*.app
+*.dll
+*.dylib
+*.exe
+*.exp
+*.idb
+*.ilk
+*.iobj
+*.ipdb
+*.lib
+*.obj
+*.o
+*.out
+*.pdb
+*.so
+
+# Dependency and precompiled-header files
+*.d
+*.gch
+*.pch
+
+# JetBrains IDEs
+.idea/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+ipch/
+
+# Visual Studio Code
+.vscode/*
+*.code-workspace
+.history/
+
+# Logs and local scratch files
+*.log
+*.tmp
+*.temp
+*~
+~$*

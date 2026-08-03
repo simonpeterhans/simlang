@@ -1,0 +1,8 @@
+Checks: >
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-member-init,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -modernize-return-braced-init-list,
+  -readability-use-anyofallof,
+  -return-braced-init-list
