@@ -12,6 +12,7 @@
 #include "runtime/executableimage.h"
 #include "runtime/memory/typelayout.h"
 #include "runtime/memory/typelayouttable.h"
+#include "runtime/op/opcode.h"
 #include "runtime/runtimedebuginfo.h"
 #include "runtime/runtimeerrorsink.h"
 #include "runtime/stringdata.h"
