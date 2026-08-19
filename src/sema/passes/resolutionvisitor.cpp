@@ -336,6 +336,8 @@ bool ResolutionVisitor::visitParamDeclaration(ParamDeclarationNode* node)
     // Otherwise, we're good to go and can create a new symbol.
     Symbol* symbol = mCtx.mSymbols.createSymbol(SymbolType::cParameter);
     symbol->mIdentifier = node->mIdentifier;
+    // For now, params are mutable.
+    symbol->mFlags.set(SymbolFlags::cMutable, true);
     symbol->mFlags.set(SymbolFlags::cInOut, node->mIsInOut);
 
     // Add the symbol to the current scope.

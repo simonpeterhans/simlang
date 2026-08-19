@@ -69,7 +69,26 @@ static bool isSupportedMapKeyType(Type* type)
 
 static bool isSupportedMapValueType(Type* type)
 {
+    // Currently the same as list types.
     return isSupportedListElementType(type);
+}
+
+static bool isValidConstType(Type* type)
+{
+    switch (getPrimitiveKind(type))
+    {
+        case PrimitiveTypeKind::cInt:
+        case PrimitiveTypeKind::cFloat:
+        case PrimitiveTypeKind::cBool:
+        case PrimitiveTypeKind::cString:
+        {
+            return true;
+        }
+        default:
+        {
+            return false;
+        }
+    }
 }
 
 bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
@@ -136,20 +155,35 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
         node->mSymbol->mType = declaredType;
     }
 
+    // Const checks, currently we only allow primitives.
+    bool isConstDeclaration = (s->mFlags.test(SymbolFlags::cMutable) == false);
+    bool hasValidConstType = true;
+
+    // If we have one, make sure the type is valid.
+    if (isConstDeclaration && isErrorType(s->mType) == false)
+    {
+        hasValidConstType = isValidConstType(s->mType);
+        if (hasValidConstType == false)
+        {
+            mCtx.report<cInvalidConstType>(node->mIdentifierRange, typeToString(s->mType));
+        }
+    }
+
     bool hasConstExprInit = node->mInit != nullptr && node->mInit->mFlags.test(cExprIsConstExpr);
 
+    // Global stuff needs a const expr initializer.
     if (s->mSymbolType == SymbolType::cGlobalVariable && node->mInit != nullptr && hasValidResolvedType(node->mInit) &&
         hasConstExprInit == false)
     {
         mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
     }
 
-    if ((s->mFlags.test(SymbolFlags::cMutable) == false) &&
+    // If the variable is const and the expression is const expr, mark the variable as such.
+    if (isConstDeclaration && hasValidConstType &&
         (s->mSymbolType == SymbolType::cGlobalVariable || s->mSymbolType == SymbolType::cStackVariable ||
          s->mSymbolType == SymbolType::cParameter) &&
         hasConstExprInit)
     {
-        // Mark the variable as constexpr.
         s->mFlags.set(SymbolFlags::cConstExpr, true);
     }
 

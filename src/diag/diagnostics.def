@@ -84,6 +84,7 @@ X( cInvalidCast,                          cError,   "Invalid cast.",            
 X( cInvalidFloatToIntCast,                cError,   "Invalid float-to-int cast.",              "Float value cannot be represented as int." )
 X( cVariableInitializerRequired,          cError,   "Initializer missing.",                    "Initializer for variable '{}' is required." )
 X( cGlobalInitializerNotConstExpr,        cError,   "Global initializer not constexpr.",       "Initializer for global '{}' must be a constexpr expression." )
+X( cInvalidConstType,                     cError,   "Invalid const type.",                      "Type '{}' cannot be declared const. Const declarations require int, float, bool, or string." )
 X( cNotAnLValue,                          cError,   "Not an lvalue.",                          "Expression cannot be assigned to." )
 X( cNotMutable,                           cError,   "Not mutable.",                            "Cannot assign to immutable value." )
 X( cInvalidAssignmentOperands,            cError,   "Invalid assignment operands.",            "Operator '{}' cannot assign value of type '{}' to '{}'." )

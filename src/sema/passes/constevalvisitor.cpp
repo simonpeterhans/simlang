@@ -141,7 +141,7 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 {
     Symbol* s = node->mSymbol;
 
-    // Only immutable variables (val) can be constexpr.
+    // Only immutable variables (const) can be constexpr.
     if (s->mFlags.test(SymbolFlags::cMutable))
     {
         return false;
