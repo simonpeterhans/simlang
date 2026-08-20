@@ -68,6 +68,7 @@ X( cImportedSymbolNotFound,               cError,   "Imported symbol not found."
 X( cImportedSymbolNotExported,            cError,   "Imported symbol is private.",             "Symbol '{}' is defined but not exported by the imported module." )
 X( cUndefinedIdentifier,                  cError,   "Undefined identifier.",                   "Identifier '{}' is not defined in this scope." )
 X( cThisOutsideMethod,                    cError,   "'this' outside method.",                  "Cannot use 'this' outside of a method context." )
+X( cInvalidFieldDefaultReference,         cError,   "Invalid field default.",                  "Default initializer for field '{}' cannot refer to instance member '{}'." )
 X( cInvalidModuleAccess,                  cError,   "Invalid module access.",                  "Module access requires identifier expressions." )
 X( cNotAModule,                           cError,   "Identifier is not a module.",             "Identifier '{}' is not a module." )
 X( cSymbolIsNotType,                      cError,   "Symbol is not a type.",                   "Symbol '{}' cannot be used as a type." )

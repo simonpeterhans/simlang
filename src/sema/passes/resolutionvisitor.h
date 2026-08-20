@@ -36,6 +36,7 @@ private:
     CompilerContext& mCtx;
 
     Symbol* mCurrentSymbol = nullptr;
+    Symbol* mCurrentFieldDefault = nullptr;
     TranslationUnitNode* mCurrentTranslationUnit = nullptr;
 };
 
