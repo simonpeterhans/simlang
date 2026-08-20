@@ -46,15 +46,25 @@ AssignmentOp Parser::getAssignmentOp(TokenType tt) const
 
 StatementNode* Parser::parseEmptyStatement()
 {
+    // Consume the ';'.
     Token semiToken = consume();
     return mCtx.create<EmptyStatementNode>(semiToken.getRange());
 }
 
 StatementNode* Parser::parseBlock()
 {
-    Token leftBraceToken = consume();
+    // { stmt0; stmt1; ... }
+
+    // Consume the '{'.
+    Token leftBraceToken = cErrorToken;
+    if (expect(TokenType::cLeftBrace, &leftBraceToken, true) == false)
+    {
+        return nullptr;
+    }
+
     std::vector<StatementNode*> bodyStatements;
 
+    // Parse statements until the closing '}' or EOF.
     while (getCurrentToken().mType != TokenType::cRightBrace && getCurrentToken().mType != TokenType::cEOF)
     {
         if (StatementNode* stmt = parseStatement())
@@ -63,32 +73,40 @@ StatementNode* Parser::parseBlock()
         }
     }
 
+    // Consume the '}'.
     if (tryConsume(TokenType::cRightBrace) == false)
     {
         mCtx.report<cMissingClosingDelim>(getCurrentTokenRange(), TokenType::cRightBrace, getCurrentTokenText());
         return nullptr;
     }
 
+    // Build the block node.
     ArrayView<StatementNode*> bodyStatementsView = makeArrayView(mCtx.mAllocator, bodyStatements);
     return mCtx.create<BlockStatementNode>(makeRangeToPrevious(leftBraceToken), bodyStatementsView);
 }
 
 StatementNode* Parser::parseAssignment(ExpressionNode* lhs, bool consumeSemi)
 {
+    // lhs op rhs
+
+    // Get the assignment op for the current token type.
     AssignmentOp op = getAssignmentOp(getCurrentTokenType());
     if (op == AssignmentOp::cInvalid)
     {
         return nullptr;
     }
 
+    // Consume the assignment op.
     consume();
 
+    // Parse the RHS.
     ExpressionNode* rhs = parseExpression();
     if (rhs == nullptr)
     {
         return nullptr;
     }
 
+    // Include the semicolon in the range when requested.
     SourceRange range = lhs->makeRangeTo(rhs);
     if (consumeSemi)
     {
@@ -105,12 +123,14 @@ StatementNode* Parser::parseAssignment(ExpressionNode* lhs, bool consumeSemi)
 
 StatementNode* Parser::parseExpressionOrAssignment(bool consumeSemi)
 {
+    // Parse the expression that either forms the whole statement or the LHS of an assignment.
     ExpressionNode* expr = parseExpression();
     if (expr == nullptr)
     {
         return nullptr;
     }
 
+    // If an assignment op follows, parse this as an assignment statement.
     TokenType tt = getCurrentTokenType();
 
     switch (tt)
@@ -135,9 +155,11 @@ StatementNode* Parser::parseExpressionOrAssignment(bool consumeSemi)
         }
     }
 
+    // Otherwise, this is a regular expression statement.
     SourceRange range = expr->mSourceRange;
     if (consumeSemi)
     {
+        // Include the semicolon in the range when requested.
         if (expectSemi() == false)
         {
             return nullptr;
@@ -223,7 +245,10 @@ void Parser::parseMemberSpecifiers(FlagSet<NodeFlagType>& flags)
 
 StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
 {
-    const Token startToken = getCurrentToken();
+    // (var | const) identifier [: type] [= expression]
+
+    // Keep the first token for range purposes.
+    Token startToken = getCurrentToken();
 
     Token nameToken = cErrorToken;
     TypeSpecifierNode* typeSpec = nullptr;
@@ -241,6 +266,7 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
         return node;
     };
 
+    // Consume declaration and mutability stuff.
     if (tryConsume(TokenType::cVar))
     {
         flags.set(cStmtIsMutable);
@@ -254,11 +280,13 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
         return nullptr;
     }
 
+    // Parse the variable name.
     if (expect(TokenType::cIdentifier, &nameToken, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the type annotation if we have one.
     if (tryConsume(TokenType::cColon))
     {
         typeSpec = parseTypeSpec();
@@ -268,8 +296,10 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
         }
     }
 
+    // If we're not in a type declaration, expect "==".
     if (mInTypeDeclaration == false || check(TokenType::cAss))
     {
+        // Consume the '='.
         if (tryConsume(TokenType::cAss) == false)
         {
             if (mInTypeDeclaration == false)
@@ -283,6 +313,7 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
             return nullptr;
         }
 
+        // Parse the initializer expression.
         init = parseExpression();
         if (init == nullptr)
         {
@@ -306,9 +337,11 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
 
 StatementNode* Parser::parseReturn()
 {
+    // Consume the "return".
     Token returnToken = consume();
     ExpressionNode* expr = nullptr;
 
+    // Parse the optional return expression.
     if (check(TokenType::cSemiColon) == false)
     {
         expr = parseExpression();
@@ -318,6 +351,7 @@ StatementNode* Parser::parseReturn()
         }
     }
 
+    // Consume the ';'.
     if (expectSemi() == false)
     {
         return nullptr;
@@ -328,9 +362,12 @@ StatementNode* Parser::parseReturn()
 
 StatementNode* Parser::parseIf()
 {
+    // if (condition) { ... } [else if (condition) { ... }] [else { ... }]
+
     std::vector<IfBranchStatementNode*> branches;
     StatementNode* elseBody = nullptr;
 
+    // Build the full if statement once all branches have been parsed.
     auto buildNode = [&]()
     {
         ArrayView<IfBranchStatementNode*> branchesView = makeArrayView(mCtx.mAllocator, branches);
@@ -340,26 +377,33 @@ StatementNode* Parser::parseIf()
         return mCtx.create<IfStatementNode>(range, branchesView, elseBody);
     };
 
+    // Parse either the initial "if" branch or an "else if" branch.
     auto parseIfBranch = [this]() -> IfBranchStatementNode*
     {
+        // Consume the "if".
         Token ifToken = consume();
+
+        // Consume the '('.
         if (expect(TokenType::cLeftParen, nullptr, true) == false)
         {
             return nullptr;
         }
 
+        // Parse the branch condition.
         ExpressionNode* condition = parseExpression();
         if (condition == nullptr)
         {
             return nullptr;
         }
 
+        // Consume the ')'.
         if (expect(TokenType::cRightParen, nullptr, true) == false)
         {
             return nullptr;
         }
 
-        StatementNode* body = parseStatement();
+        // Parse the branch body.
+        StatementNode* body = parseBlock();
         if (body == nullptr)
         {
             return nullptr;
@@ -367,6 +411,7 @@ StatementNode* Parser::parseIf()
         return mCtx.create<IfBranchStatementNode>(makeRange(ifToken, body), condition, body);
     };
 
+    // Parse the initial "if" branch.
     IfBranchStatementNode* branch = parseIfBranch();
     if (branch == nullptr)
     {
@@ -374,6 +419,7 @@ StatementNode* Parser::parseIf()
     }
     branches.push_back(branch);
 
+    // Parse all else ifs and the final else.
     while (tryConsume(TokenType::cElse))
     {
         if (getCurrentToken().mType == TokenType::cIf)
@@ -387,7 +433,7 @@ StatementNode* Parser::parseIf()
         }
         else
         {
-            elseBody = parseStatement();
+            elseBody = parseBlock();
             if (elseBody == nullptr)
             {
                 return nullptr;
@@ -401,24 +447,32 @@ StatementNode* Parser::parseIf()
 
 StatementNode* Parser::parseWhile()
 {
+    // while (condition) { ... }
+
+    // Consume the "while".
     Token whileToken = consume();
+
+    // Consume the '('.
     if (expect(TokenType::cLeftParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the loop condition.
     ExpressionNode* condition = parseExpression();
     if (condition == nullptr)
     {
         return nullptr;
     }
 
+    // Consume the ')'.
     if (expect(TokenType::cRightParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
-    StatementNode* body = parseStatement();
+    // Parse the loop body.
+    StatementNode* body = parseBlock();
     if (body == nullptr)
     {
         return nullptr;
@@ -428,16 +482,21 @@ StatementNode* Parser::parseWhile()
 
 StatementNode* Parser::parseFor()
 {
+    // for (initializer; condition; increment) { ... }
+
+    // Consume the "for".
     Token forToken = consume();
     StatementNode* init = nullptr;
     ExpressionNode* condition = nullptr;
     StatementNode* increment = nullptr;
 
+    // Consume the '('.
     if (expect(TokenType::cLeftParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the initializer if we have one.
     if (getCurrentTokenType() != TokenType::cSemiColon)
     {
         if (getCurrentTokenType() == TokenType::cVar || getCurrentTokenType() == TokenType::cConst)
@@ -458,11 +517,13 @@ StatementNode* Parser::parseFor()
         }
     }
 
+    // Consume the first ';'.
     if (expect(TokenType::cSemiColon, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the condition if we have one.
     if (getCurrentTokenType() != TokenType::cSemiColon)
     {
         condition = parseExpression();
@@ -472,11 +533,13 @@ StatementNode* Parser::parseFor()
         }
     }
 
+    // Consume the second ';'.
     if (expect(TokenType::cSemiColon, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the increment if we have one.
     if (getCurrentTokenType() != TokenType::cRightParen)
     {
         increment = parseExpressionOrAssignment(false);
@@ -486,12 +549,14 @@ StatementNode* Parser::parseFor()
         }
     }
 
+    // Consume the ')'.
     if (expect(TokenType::cRightParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
-    StatementNode* body = parseStatement();
+    // Parse the loop body.
+    StatementNode* body = parseBlock();
     if (body == nullptr)
     {
         return nullptr;
@@ -501,23 +566,31 @@ StatementNode* Parser::parseFor()
 
 StatementNode* Parser::parseSwitch()
 {
+    // switch (expression) { case expression: ... default: ... }
+
+    // Consume the "switch".
     Token switchToken = consume();
+
+    // Consume the '('.
     if (expect(TokenType::cLeftParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Parse the switch expression.
     ExpressionNode* expr = parseExpression();
     if (expr == nullptr)
     {
         return nullptr;
     }
 
+    // Consume the ')'.
     if (expect(TokenType::cRightParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
+    // Consume the '{'.
     if (expect(TokenType::cLeftBrace, nullptr, true) == false)
     {
         return nullptr;
@@ -525,9 +598,12 @@ StatementNode* Parser::parseSwitch()
 
     std::vector<SwitchSectionStatementNode*> sections;
 
+    // Parse all branches.
     while (getCurrentTokenType() != TokenType::cRightBrace && getCurrentTokenType() != TokenType::cEOF)
     {
         TokenType labelType = getCurrentTokenType();
+
+        // Check if we have a case or a default label.
         if (labelType != TokenType::cCase && labelType != TokenType::cDefault)
         {
             mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
@@ -537,8 +613,11 @@ StatementNode* Parser::parseSwitch()
             continue;
         }
 
+        // Consume the label.
         Token labelToken = consume();
         ExpressionNode* caseExpression = nullptr;
+
+        // If we have a label, parse the expression.
         if (labelType == TokenType::cCase)
         {
             caseExpression = parseExpression();
@@ -548,11 +627,13 @@ StatementNode* Parser::parseSwitch()
             }
         }
 
+        // Consume the ':'.
         if (expect(TokenType::cColon, nullptr, true) == false)
         {
             return nullptr;
         }
 
+        // Parse statements until the next label or the end of the switch.
         std::vector<StatementNode*> statements;
         while (getCurrentTokenType() != TokenType::cCase && getCurrentTokenType() != TokenType::cDefault &&
                getCurrentTokenType() != TokenType::cRightBrace && getCurrentTokenType() != TokenType::cEOF)
@@ -563,13 +644,15 @@ StatementNode* Parser::parseSwitch()
             }
         }
 
-        ArrayView<StatementNode*> statementsView = makeArrayView(mCtx.mAllocator, statements);
+        // Build a block for the section body and then the section itself.
         SourceLocation end = statements.empty() ? mPreviousTokenEnd : statements.back()->mSourceRange.getEndLoc();
-        sections.push_back(mCtx.create<SwitchSectionStatementNode>(SourceRange{labelToken.getStartLoc(), end},
-                                                                   caseExpression,
-                                                                   statementsView));
+        SourceRange sectionRange{labelToken.getStartLoc(), end};
+        ArrayView<StatementNode*> statementsView = makeArrayView(mCtx.mAllocator, statements);
+        auto* body = mCtx.create<BlockStatementNode>(sectionRange, statementsView);
+        sections.push_back(mCtx.create<SwitchSectionStatementNode>(sectionRange, caseExpression, body));
     }
 
+    // Consume the '}'.
     if (tryConsume(TokenType::cRightBrace) == false)
     {
         mCtx.report<cMissingClosingDelim>(getCurrentTokenRange(), TokenType::cRightBrace, getCurrentTokenText());
@@ -582,7 +665,10 @@ StatementNode* Parser::parseSwitch()
 
 StatementNode* Parser::parseContinue()
 {
+    // Consume the "continue".
     Token continueToken = consume();
+
+    // Consume the ';'.
     if (expectSemi() == false)
     {
         return nullptr;
@@ -593,7 +679,10 @@ StatementNode* Parser::parseContinue()
 
 StatementNode* Parser::parseBreak()
 {
+    // Consume the "break".
     Token breakToken = consume();
+
+    // Consume the ';'.
     if (expectSemi() == false)
     {
         return nullptr;
@@ -604,23 +693,30 @@ StatementNode* Parser::parseBreak()
 
 StatementNode* Parser::parsePrint()
 {
+    // print(expression);
+
+    // Consume the "print".
     Token printToken = consume();
     ExpressionNode* expr = nullptr;
 
+    // Consume the '('.
     if (tryConsume(TokenType::cLeftParen) == false)
     {
         mCtx.report<cUnexpectedToken>(getCurrentTokenRange(), TokenType::cLeftParen, getCurrentTokenText());
         return nullptr;
     }
 
+    // Parse the expression to print.
     expr = parseExpression();
     if (expr == nullptr)
     {
         return nullptr;
     }
 
+    // Consume the ')'.
     if (tryConsume(TokenType::cRightParen) == false)
     {
+        // At a statement boundary, report the more specific missing-delimiter diagnostic.
         if (getCurrentTokenType() == TokenType::cSemiColon || getCurrentTokenType() == TokenType::cRightBrace ||
             getCurrentTokenType() == TokenType::cEOF)
         {
@@ -633,6 +729,7 @@ StatementNode* Parser::parsePrint()
         return nullptr;
     }
 
+    // Consume the ';'.
     if (expectSemi() == false)
     {
         return nullptr;

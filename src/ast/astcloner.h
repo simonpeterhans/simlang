@@ -328,16 +328,9 @@ public:
 
     StatementNode* cloneSwitchSectionStatement(SwitchSectionStatementNode* n)
     {
-        std::vector<StatementNode*> statements;
-        statements.reserve(n->mStatements.size());
-        for (StatementNode* statement : n->mStatements)
-        {
-            StatementNode* clonedStatement = cloneStatement(statement);
-            statements.push_back(clonedStatement);
-        }
-
         ExpressionNode* caseExpression = cloneExpression(n->mCaseExpression);
-        return cloneNode<SwitchSectionStatementNode>(n, caseExpression, makeArrayView(mAllocator, statements));
+        StatementNode* body = cloneStatement(n->mBody);
+        return cloneNode<SwitchSectionStatementNode>(n, caseExpression, body);
     }
 
     StatementNode* cloneSwitchStatement(SwitchStatementNode* n)

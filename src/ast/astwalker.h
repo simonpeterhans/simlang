@@ -161,20 +161,7 @@ public:
 
     bool visitSwitchSectionStatement(SwitchSectionStatementNode* n)
     {
-        if (this->visit(n->mCaseExpression) == false)
-        {
-            return false;
-        }
-
-        for (StatementNode* stmt : n->mStatements)
-        {
-            if (this->visit(stmt) == false)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return this->visit(n->mCaseExpression) && this->visit(n->mBody);
     }
 
     bool visitSwitchStatement(SwitchStatementNode* n)

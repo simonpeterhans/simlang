@@ -504,12 +504,9 @@ bool CodeGenVisitor::visitSwitchStatement(SwitchStatementNode* node)
     {
         emit<OpCode::cLabel>(sectionLabels[i]);
 
-        for (StatementNode* stmt : node->mSections[i]->mStatements)
+        if (visit(node->mSections[i]->mBody) == false)
         {
-            if (visit(stmt) == false)
-            {
-                return false;
-            }
+            return false;
         }
     }
 

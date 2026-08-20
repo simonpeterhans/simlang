@@ -264,18 +264,16 @@ struct WhileStatementNode : StatementNode
 
 struct SwitchSectionStatementNode : StatementNode
 {
-    explicit SwitchSectionStatementNode(SourceRange range,
-                                        ExpressionNode* caseExpression,
-                                        ArrayView<StatementNode*> statements)
+    explicit SwitchSectionStatementNode(SourceRange range, ExpressionNode* caseExpression, StatementNode* body)
         : StatementNode(NodeType::cSwitchSectionStatement, range)
         , mCaseExpression(caseExpression)
-        , mStatements(statements)
+        , mBody(body)
     {
     }
 
     // Nullptr means this is the default section.
     ExpressionNode* mCaseExpression;
-    ArrayView<StatementNode*> mStatements;
+    StatementNode* mBody;
 
     // Resolved constexpr value for case labels.
     i32 mCaseValue = 0;

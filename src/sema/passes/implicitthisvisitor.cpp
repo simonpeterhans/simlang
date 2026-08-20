@@ -189,13 +189,9 @@ bool ImplicitThisVisitor::visitSwitchStatement(SwitchStatementNode* node)
     for (SwitchSectionStatementNode* section : node->mSections)
     {
         checkExpression(section->mCaseExpression);
-
-        for (StatementNode* stmt : section->mStatements)
+        if (visit(section->mBody) == false)
         {
-            if (visit(stmt) == false)
-            {
-                return false;
-            }
+            return false;
         }
     }
 
