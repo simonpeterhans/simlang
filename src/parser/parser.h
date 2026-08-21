@@ -19,6 +19,7 @@ namespace simlang
 
 class Source;
 class Tokenizer;
+struct CallArgument;
 struct ExpressionNode;
 struct Identifier;
 struct ImportSelectedEntry;
@@ -135,7 +136,7 @@ private:
     ExpressionNode* parseParen();
     ExpressionNode* parseMake();
     ExpressionNode* parseNew();
-    bool parseArgumentList(std::vector<ExpressionNode*>& args);
+    bool parseArgumentList(std::vector<CallArgument>& args);
     ExpressionNode* parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec);
     ExpressionNode* parseObjectConstruction(Token constructionToken,
                                             TypeSpecifierNode* typeSpec,

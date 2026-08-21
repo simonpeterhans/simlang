@@ -97,12 +97,12 @@ public:
 
     ExpressionNode* cloneNewObject(NewObjectNode* n)
     {
-        std::vector<ExpressionNode*> args;
+        std::vector<CallArgument> args;
         args.reserve(n->mInitializerArguments.size());
-        for (ExpressionNode* arg : n->mInitializerArguments)
+        for (const CallArgument& arg : n->mInitializerArguments)
         {
-            ExpressionNode* clonedArg = cloneExpression(arg);
-            args.push_back(clonedArg);
+            ExpressionNode* clonedValue = cloneExpression(arg.mValue);
+            args.push_back(CallArgument{arg.mSourceRange, clonedValue, arg.mIsInOut});
         }
 
         std::vector<FieldInitializer*> fields;
@@ -126,12 +126,12 @@ public:
 
     ExpressionNode* cloneFunctionCall(FunctionCallNode* n)
     {
-        std::vector<ExpressionNode*> args;
+        std::vector<CallArgument> args;
         args.reserve(n->mArgs.size());
-        for (ExpressionNode* arg : n->mArgs)
+        for (const CallArgument& arg : n->mArgs)
         {
-            ExpressionNode* clonedArg = cloneExpression(arg);
-            args.push_back(clonedArg);
+            ExpressionNode* clonedValue = cloneExpression(arg.mValue);
+            args.push_back(CallArgument{arg.mSourceRange, clonedValue, arg.mIsInOut});
         }
 
         ExpressionNode* receiver = cloneExpression(n->mReceiver);

@@ -115,7 +115,7 @@ u32 CodeGenVisitor::getInterfaceTableIndex(AggregateType* aggregateType, Interfa
     return cInvalidInterfaceMethodTableIndex;
 }
 
-bool CodeGenVisitor::emitCallArguments(ArrayView<ExpressionNode*> args, const FunctionType* funcType)
+bool CodeGenVisitor::emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType)
 {
     // Go over all the args.
     for (usize i = 0; i < args.size(); ++i)
@@ -125,14 +125,14 @@ bool CodeGenVisitor::emitCallArguments(ArrayView<ExpressionNode*> args, const Fu
         // If the param is an in-out param, emit the address of the arg instead of the value.
         if (param.mIsInOut)
         {
-            if (emitAddress(args[i], AddressMode::cStorage) == false)
+            if (emitAddress(args[i].mValue, AddressMode::cStorage) == false)
             {
                 return false;
             }
         }
         else
         {
-            if (visit(args[i]) == false)
+            if (visit(args[i].mValue) == false)
             {
                 return false;
             }
@@ -226,7 +226,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "add") || identifierEquals(memberAccess->mMember, "push"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -237,7 +237,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "addList"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -270,7 +270,8 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "insertAt"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false || visit(node->mArgs[1]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
+            visit(node->mArgs[1].mValue) == false)
         {
             return false;
         }
@@ -281,7 +282,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "removeAt"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -292,7 +293,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "indexOf"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -303,7 +304,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "contains"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -325,7 +326,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
 
     if (identifierEquals(memberAccess->mMember, "reserve"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -377,7 +378,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
     if (identifierEquals(memberAccess->mMember, "containsKey"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -388,7 +389,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
     if (identifierEquals(memberAccess->mMember, "get"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -399,7 +400,8 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
     if (identifierEquals(memberAccess->mMember, "set"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false || visit(node->mArgs[1]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
+            visit(node->mArgs[1].mValue) == false)
         {
             return false;
         }
@@ -410,7 +412,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
     if (identifierEquals(memberAccess->mMember, "remove"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }
@@ -421,7 +423,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
     if (identifierEquals(memberAccess->mMember, "reserve"))
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0]) == false)
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
         {
             return false;
         }

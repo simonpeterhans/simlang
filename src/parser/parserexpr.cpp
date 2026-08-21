@@ -869,7 +869,7 @@ ExpressionNode* Parser::parseNew()
     return parseClassConstruction(newToken, typeSpec);
 }
 
-bool Parser::parseArgumentList(std::vector<ExpressionNode*>& args)
+bool Parser::parseArgumentList(std::vector<CallArgument>& args)
 {
     // e0, e1, ...)
 
@@ -883,7 +883,13 @@ bool Parser::parseArgumentList(std::vector<ExpressionNode*>& args)
     while (true)
     {
         // Consume the "inout" if we have one.
-        bool isInOutArgument = tryConsume(TokenType::cInOut);
+        Token inOutToken = cErrorToken;
+        bool isInOutArgument = false;
+        if (check(TokenType::cInOut))
+        {
+            inOutToken = consume();
+            isInOutArgument = true;
+        }
 
         // Parse the expression.
         ExpressionNode* arg = parseExpression();
@@ -891,8 +897,11 @@ bool Parser::parseArgumentList(std::vector<ExpressionNode*>& args)
         {
             return false;
         }
-        arg->mFlags.set(cExprIsInOutArgument, isInOutArgument);
-        args.push_back(arg);
+
+        // If we have an inout token, include the inout in the range, otherwise use the range.
+        SourceRange argumentRange = isInOutArgument ? inOutToken.makeRangeTo(arg->mSourceRange) : arg->mSourceRange;
+        CallArgument callArg = CallArgument{argumentRange, arg, isInOutArgument};
+        args.push_back(callArg);
 
         // Check whether to expect more args.
         if (check(TokenType::cComma))
@@ -938,14 +947,14 @@ ExpressionNode* Parser::parseClassConstruction(Token constructionToken, TypeSpec
     }
 
     // Parse the argument list.
-    std::vector<ExpressionNode*> args;
+    std::vector<CallArgument> args;
     if (parseArgumentList(args) == false)
     {
         return nullptr;
     }
 
     ArrayView<FieldInitializer*> fieldsView;
-    ArrayView<ExpressionNode*> argsView = makeArrayView(mCtx.mAllocator, args);
+    ArrayView<CallArgument> argsView = makeArrayView(mCtx.mAllocator, args);
 
     return mCtx.create<NewObjectNode>(makeRangeToPrevious(constructionToken),
                                       typeSpec,
@@ -967,7 +976,7 @@ ExpressionNode* Parser::parseObjectConstruction(Token constructionToken,
     auto buildNode = [&]()
     {
         ArrayView<FieldInitializer*> fieldsView = makeArrayView(mCtx.mAllocator, fields);
-        ArrayView<ExpressionNode*> argsView;
+        ArrayView<CallArgument> argsView;
 
         return mCtx.create<NewObjectNode>(makeRangeToPrevious(constructionToken),
                                           typeSpec,
@@ -1060,7 +1069,7 @@ ExpressionNode* Parser::parseFunctionCall(ExpressionNode* lhs)
     // Consume the '('.
     consume();
 
-    std::vector<ExpressionNode*> args;
+    std::vector<CallArgument> args;
 
     // Parse the argument list (which will consume the ')').
     if (parseArgumentList(args) == false)
@@ -1068,7 +1077,7 @@ ExpressionNode* Parser::parseFunctionCall(ExpressionNode* lhs)
         return nullptr;
     }
 
-    ArrayView<ExpressionNode*> argsView = makeArrayView(mCtx.mAllocator, args);
+    ArrayView<CallArgument> argsView = makeArrayView(mCtx.mAllocator, args);
 
     return mCtx.create<FunctionCallNode>(makeRangeToPrevious(lhs), lhs, argsView);
 }

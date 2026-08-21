@@ -49,9 +49,9 @@ public:
             return false;
         }
 
-        for (ExpressionNode* arg : n->mInitializerArguments)
+        for (const CallArgument& arg : n->mInitializerArguments)
         {
-            if (this->visit(arg) == false)
+            if (this->visit(arg.mValue) == false)
             {
                 return false;
             }
@@ -75,9 +75,9 @@ public:
             return false;
         }
 
-        for (ExpressionNode* arg : n->mArgs)
+        for (const CallArgument& arg : n->mArgs)
         {
-            if (this->visit(arg) == false)
+            if (this->visit(arg.mValue) == false)
             {
                 return false;
             }

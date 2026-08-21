@@ -148,7 +148,7 @@ private:
     u32 getInterfaceTableIndex(AggregateType* aggregateType, InterfaceType* interfaceType);
 
     // Call and interface emission.
-    bool emitCallArguments(ArrayView<ExpressionNode*> args, const FunctionType* funcType);
+    bool emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType);
     bool emitMethodReceiver(MemberAccessNode* memberAccess);
     bool emitInterfaceMethodDispatch(MemberAccessNode* memberAccess, const FunctionType* funcType);
     bool emitListMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);

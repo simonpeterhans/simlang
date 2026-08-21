@@ -21,9 +21,8 @@ enum ExprFlags : NodeFlagType
     cExprIsMutable = 1 << (cNodeFlagOffset + 1),
     cExprIsLValue = 1 << (cNodeFlagOffset + 2),
     cExprIsUsedAsLValue = 1 << (cNodeFlagOffset + 3),
-    cExprIsInOutArgument = 1 << (cNodeFlagOffset + 4),
 
-    cExprFlagsOffset = cNodeFlagOffset + 5
+    cExprFlagsOffset = cNodeFlagOffset + 4
 };
 
 struct ExpressionNode : ASTNode
@@ -172,6 +171,13 @@ struct FieldInitializer
     Symbol* mResolvedField = nullptr;
 };
 
+struct CallArgument
+{
+    SourceRange mSourceRange;
+    ExpressionNode* mValue = nullptr;
+    bool mIsInOut = false;
+};
+
 enum class ConstructionKind : u8
 {
     cValue,
@@ -183,7 +189,7 @@ struct NewObjectNode : ExpressionNode
     explicit NewObjectNode(SourceRange range,
                            TypeSpecifierNode* typeSpecifier,
                            ArrayView<FieldInitializer*> fieldInitializers,
-                           ArrayView<ExpressionNode*> initializerArguments,
+                           ArrayView<CallArgument> initializerArguments,
                            ConstructionKind constructionKind)
         : ExpressionNode(NodeType::cNewObject, range)
         , mTypeSpecifier(typeSpecifier)
@@ -195,7 +201,7 @@ struct NewObjectNode : ExpressionNode
 
     TypeSpecifierNode* mTypeSpecifier;
     ArrayView<FieldInitializer*> mFieldInitializers;
-    ArrayView<ExpressionNode*> mInitializerArguments;
+    ArrayView<CallArgument> mInitializerArguments;
     ConstructionKind mConstructionKind = ConstructionKind::cReference;
 
     // The selected class init method.
@@ -204,7 +210,7 @@ struct NewObjectNode : ExpressionNode
 
 struct FunctionCallNode : ExpressionNode
 {
-    explicit FunctionCallNode(SourceRange range, ExpressionNode* receiver, ArrayView<ExpressionNode*> args)
+    explicit FunctionCallNode(SourceRange range, ExpressionNode* receiver, ArrayView<CallArgument> args)
         : ExpressionNode(NodeType::cFunctionCall, range)
         , mReceiver(receiver)
         , mArgs(args)
@@ -212,7 +218,7 @@ struct FunctionCallNode : ExpressionNode
     }
 
     ExpressionNode* mReceiver;
-    ArrayView<ExpressionNode*> mArgs;
+    ArrayView<CallArgument> mArgs;
 };
 
 struct IndexCallNode : ExpressionNode

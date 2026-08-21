@@ -345,9 +345,9 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         auto* funcType = static_cast<FunctionType*>(initializerSymbol->mType);
 
         // Resolve the arguments.
-        for (ExpressionNode*& argument : node->mInitializerArguments)
+        for (CallArgument& argument : node->mInitializerArguments)
         {
-            if (visit(argument) == false)
+            if (visit(argument.mValue) == false)
             {
                 return false;
             }
@@ -485,7 +485,7 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
 }
 
 bool TypeCheckVisitor::checkCallArguments(SourceRange range,
-                                          ArrayView<ExpressionNode*>& args,
+                                          ArrayView<CallArgument>& args,
                                           const FunctionType* funcType)
 {
     // If the number of arguments doesn't match, this won't work.
@@ -500,7 +500,8 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
     // Check each argument.
     for (usize i = 0; i < args.size(); ++i)
     {
-        ExpressionNode*& arg = args[i];
+        CallArgument& callArgument = args[i];
+        ExpressionNode*& arg = callArgument.mValue;
 
         if (hasValidResolvedType(arg) == false)
         {
@@ -510,7 +511,7 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
         }
 
         const FunctionParam& param = funcType->mParamTypes[i];
-        bool isInOutArgument = arg->mFlags.test(cExprIsInOutArgument);
+        bool isInOutArgument = callArgument.mIsInOut;
         if (isErrorType(param.mType))
         {
             argsOk = false;
@@ -521,7 +522,7 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
         {
             if (isInOutArgument == false)
             {
-                mCtx.report<cMissingInOutArgument>(arg->mSourceRange, i + 1);
+                mCtx.report<cMissingInOutArgument>(callArgument.mSourceRange, i + 1);
                 argsOk = false;
                 continue;
             }
@@ -558,7 +559,7 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
         {
             if (isInOutArgument)
             {
-                mCtx.report<cUnexpectedInOutArgument>(arg->mSourceRange, i + 1);
+                mCtx.report<cUnexpectedInOutArgument>(callArgument.mSourceRange, i + 1);
                 argsOk = false;
                 continue;
             }
@@ -624,9 +625,9 @@ bool TypeCheckVisitor::visitFunctionCall(FunctionCallNode* node)
     auto* funcType = static_cast<FunctionType*>(node->mReceiver->mResolvedType);
 
     // Resolve the args.
-    for (usize i = 0; i < node->mArgs.size(); ++i)
+    for (CallArgument& argument : node->mArgs)
     {
-        if (visit(node->mArgs[i]) == false)
+        if (visit(argument.mValue) == false)
         {
             return false;
         }

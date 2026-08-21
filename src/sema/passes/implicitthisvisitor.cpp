@@ -64,9 +64,9 @@ bool ImplicitThisVisitor::visitTernaryExpr(TernaryExprNode* node)
 
 bool ImplicitThisVisitor::visitNewObject(NewObjectNode* node)
 {
-    for (ExpressionNode*& arg : node->mInitializerArguments)
+    for (CallArgument& arg : node->mInitializerArguments)
     {
-        checkExpression(arg);
+        checkExpression(arg.mValue);
     }
     for (FieldInitializer* init : node->mFieldInitializers)
     {
@@ -79,9 +79,9 @@ bool ImplicitThisVisitor::visitNewObject(NewObjectNode* node)
 bool ImplicitThisVisitor::visitFunctionCall(FunctionCallNode* node)
 {
     checkExpression(node->mReceiver);
-    for (auto*& a : node->mArgs)
+    for (CallArgument& arg : node->mArgs)
     {
-        checkExpression(a);
+        checkExpression(arg.mValue);
     }
     return true;
 }

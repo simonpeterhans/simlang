@@ -92,7 +92,7 @@ private:
     void diagnoseInvalidAssignmentOperands(AssignmentStatementNode* node) const;
 
     // Calls and references.
-    bool checkCallArguments(SourceRange range, ArrayView<ExpressionNode*>& args, const FunctionType* funcType);
+    bool checkCallArguments(SourceRange range, ArrayView<CallArgument>& args, const FunctionType* funcType);
 
     // Aggregates and interfaces.
     bool allowClassToInterfaceCast(Type* aggregateType, InterfaceType* interfaceType);
