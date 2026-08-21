@@ -33,14 +33,18 @@ static bool isComparisonOp(BinaryOp op)
 
 static bool isPrimitiveConversion(ExpressionNode* expr, Type* resultType)
 {
-    // The expression to cast has to be a primitive type.
-    if (getPrimitiveKind(expr->mResolvedType) == PrimitiveTypeKind::cInvalid)
+    PrimitiveTypeKind sourceKind = getPrimitiveKind(expr->mResolvedType);
+    PrimitiveTypeKind resultKind = getPrimitiveKind(resultType);
+
+    // If either type is not a primitive, this is not a primitive conversion.
+    if (sourceKind == PrimitiveTypeKind::cInvalid || resultKind == PrimitiveTypeKind::cInvalid)
     {
         return false;
     }
 
-    // The resulting type as well.
-    return getPrimitiveKind(resultType) != PrimitiveTypeKind::cInvalid;
+    // For now, float to int is not treated as a primitive conversion since it may fail at runtime.
+    // This is because a float may not fit into an int, which is a runtime error (and thus has a side effect).
+    return sourceKind != PrimitiveTypeKind::cFloat || resultKind != PrimitiveTypeKind::cInt;
 }
 
 static bool isTrivialOperand(ExpressionNode* operand)
