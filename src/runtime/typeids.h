@@ -17,6 +17,7 @@ enum BuiltinTypeID : TypeID
     cStringTypeID,
     cListTypeID,
     cMapTypeID,
+    cFunctionTypeID,
 
     cBuiltinTypeCount
 };

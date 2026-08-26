@@ -76,7 +76,7 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
                     StringLiteralIdx stringIndex = addStringLiteral(value.as.mString);
 
                     // The string index is combined with the tag to make the address.
-                    word = cStaticStringTag | stringIndex;
+                    word = makeStaticStringHandle(stringIndex);
                     break;
                 }
                 default:
@@ -113,6 +113,38 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
                     return false;
                 }
             }
+
+            return true;
+        }
+        case TypeKind::cFunction:
+        {
+            if (value.mKind != ConstValueKind::cFunction || value.as.mFunction == nullptr)
+            {
+                SIMLANG_BREAK("Invalid function const global value.");
+                return false;
+            }
+
+            // For function pointers (and lambdas), we only allow function or syscall types as global const value.
+            Symbol* callable = value.as.mFunction;
+            VMWord entryToken = cInvalidFunctionEntryToken;
+            if (callable->mSymbolType == SymbolType::cFunction)
+            {
+                entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(callable->mIndex));
+            }
+            else if (callable->mSymbolType == SymbolType::cSyscall)
+            {
+                entryToken = makeSyscallEntryToken(mCtx.mBackend.mFunctionInfos.size(),
+                                                   static_cast<SyscallIdx>(callable->mIndex));
+            }
+            else
+            {
+                SIMLANG_BREAK("Invalid function const global symbol.");
+                return false;
+            }
+
+            // We cannot have a context for global stuff, so we just write the entry.
+            mCtx.mBackend.mInitialGlobals[globalIdx + cFunctionValueContextWord] = cNullRef;
+            mCtx.mBackend.mInitialGlobals[globalIdx + cFunctionValueEntryWord] = entryToken;
 
             return true;
         }

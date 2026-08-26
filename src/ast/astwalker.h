@@ -235,6 +235,19 @@ public:
         return true;
     }
 
+    bool visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
+    {
+        for (const FunctionTypeParameterSpecifier& param : n->mParams)
+        {
+            if (this->visit(param.mTypeSpecifier) == false)
+            {
+                return false;
+            }
+        }
+
+        return this->visit(n->mReturnTypeSpecifier);
+    }
+
     bool visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode*) { return true; }
 
     bool visitTranslationUnit(TranslationUnitNode* n)

@@ -28,6 +28,7 @@ public:
     bool visitParamDeclaration(ParamDeclarationNode* node);
 
     bool visitNamedTypeSpecifier(NamedTypeSpecifierNode* node);
+    bool visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node);
     bool visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* node);
 
     bool visitTranslationUnit(TranslationUnitNode* node);

@@ -33,7 +33,31 @@ using TypeLayoutRefOffsetIndex = u32;
 
 // Shared null value for reference-like VM values.
 // Tagged heap handles, heap addresses, static strings, stack refs, and global refs never use 0.
-inline constexpr VMWord cNullRef = 0U;
+inline constexpr VMWord cNullRef = 0;
+
+// Function values are represented as [context, entry token].
+// Named functions and syscalls have no context.
+// The entry tokens are contiguous in that we first use user-defined IDs, then syscall IDs.
+// 0 is reserved for null, so we need to offset all entry token words by 1.
+inline constexpr u32 cFunctionValueContextWord = 0;
+inline constexpr u32 cFunctionValueEntryWord = 1;
+inline constexpr u32 cFunctionValueWordCount = 2;
+inline constexpr VMWord cInvalidFunctionEntryToken = 0;
+
+constexpr VMWord makeFunctionEntryToken(FunctionIdx index)
+{
+    return index + 1;
+}
+
+constexpr VMWord makeSyscallEntryToken(u64 functionCount, SyscallIdx index)
+{
+    return static_cast<VMWord>(functionCount + static_cast<u64>(index) + 1);
+}
+
+constexpr u64 decodeFunctionEntryToken(VMWord entryToken)
+{
+    return entryToken - 1;
+}
 
 // Heap values use the top two bits and keep 30 payload bits.
 // Objects, strings, and references use heap addresses.
@@ -45,10 +69,50 @@ inline constexpr VMWord cHeapPayloadMask        = ~cHeapKindMask;
 inline constexpr VMWord cHeapHandleTag          = 0x80000000U;
 inline constexpr VMWord cHeapAddressTag         = 0xC0000000U;
 
+constexpr bool isHeapHandle(VMWord value)
+{
+    return (value & cHeapKindMask) == cHeapHandleTag;
+}
+
+constexpr bool isHeapAddress(VMWord value)
+{
+    return (value & cHeapKindMask) == cHeapAddressTag;
+}
+
+constexpr HeapIndex getHeapPayload(VMWord value)
+{
+    return value & cHeapPayloadMask;
+}
+
+constexpr VMWord makeHeapHandle(HeapIndex index)
+{
+    return cHeapHandleTag | index;
+}
+
+constexpr VMWord makeHeapAddress(HeapIndex index)
+{
+    return cHeapAddressTag | index;
+}
+
 // Static string literals: 0b01... (0x4...).
 inline constexpr VMWord cStaticStringTag         = 0x40000000U;
 inline constexpr VMWord cStaticStringTagMask     = 0xC0000000U;
 inline constexpr VMWord cStaticStringPayloadMask = ~cStaticStringTagMask;
+
+constexpr bool isStaticStringHandle(VMWord value)
+{
+    return (value & cStaticStringTagMask) == cStaticStringTag;
+}
+
+constexpr StringLiteralIdx getStaticStringLiteralIndex(VMWord value)
+{
+    return value & cStaticStringPayloadMask;
+}
+
+constexpr VMWord makeStaticStringHandle(StringLiteralIdx index)
+{
+    return cStaticStringTag | index;
+}
 
 // Reference addresses: 0b00XX...
 inline constexpr VMWord cRefAddressKindMask      = 0xF0000000U;
@@ -59,6 +123,31 @@ inline constexpr VMWord cGlobalRefAddressTag     = 0x10000000U;
 inline constexpr VMWord cStackRefAddressTag      = 0x20000000U;
 // Invalid reference addresses: 0b0011... (0x3...).
 inline constexpr VMWord cInvalidAddress          = 0x30000000U;
+
+constexpr bool isGlobalRefAddress(VMWord value)
+{
+    return (value & cRefAddressKindMask) == cGlobalRefAddressTag;
+}
+
+constexpr bool isStackRefAddress(VMWord value)
+{
+    return (value & cRefAddressKindMask) == cStackRefAddressTag;
+}
+
+constexpr u32 getRefAddressIndex(VMWord value)
+{
+    return value & cRefAddressPayloadMask;
+}
+
+constexpr VMWord makeGlobalRefAddress(u32 index)
+{
+    return cGlobalRefAddressTag | index;
+}
+
+constexpr VMWord makeStackRefAddress(u32 index)
+{
+    return cStackRefAddressTag | index;
+}
 
 // The maximum number of stack words is determined by the ref address mask.
 // This is because we need all stack addresses to be addressable.
@@ -72,7 +161,7 @@ inline constexpr InterfaceCallIdx cInvalidInterfaceCallIdx = std::numeric_limits
 
 inline constexpr HeapIndex cMaxHeapPayloadIndex = cHeapPayloadMask;
 inline constexpr HeapIndex cMaxHeapHandleIndex  = cMaxHeapPayloadIndex;
-inline constexpr u32 cMaxHeapWords              = cMaxHeapPayloadIndex + 1U;
+inline constexpr u32 cMaxHeapWords              = cMaxHeapPayloadIndex + 1;
 inline constexpr u64 cMaxValidVMAddress        = static_cast<u64>(cInvalidVMAddress) - 1;
 inline constexpr u64 cMaxValidInterfaceCallIdx = static_cast<u64>(cInvalidInterfaceCallIdx) - 1;
 

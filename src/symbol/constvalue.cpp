@@ -63,6 +63,11 @@ bool ConstValue::operator==(const ConstValue& rhs) const
 
             return true;
         }
+        case ConstValueKind::cFunction:
+        {
+            // Directly compare the function symbols.
+            return as.mFunction == rhs.as.mFunction;
+        }
         default:
         {
             return false;

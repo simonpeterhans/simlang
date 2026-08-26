@@ -52,7 +52,7 @@ u32 getWordSizeForType(Type* type)
         }
         case TypeKind::cFunction:
         {
-            return 1;
+            return cFunctionValueWordCount;
         }
         case TypeKind::cList:
         case TypeKind::cMap:

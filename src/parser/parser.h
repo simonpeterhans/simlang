@@ -186,6 +186,8 @@ private:
 
     bool parseTypeArgumentList(std::vector<TypeSpecifierNode*>& typeArgs);
 
+    TypeSpecifierNode* parseFunctionTypeSpec();
+    TypeSpecifierNode* parseNamedTypeSpec();
     TypeSpecifierNode* parseTypeSpec();
 
     ParserContext& mCtx;

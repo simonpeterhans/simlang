@@ -114,32 +114,53 @@ bool CodeGenVisitor::visitCast(CastNode* node)
 
 bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
 {
-    // If this is a constexpr, we can try to emit the value directly.
-    if (node->mSymbol->mFlags.test(SymbolFlags::cConstExpr))
-    {
-        Symbol* s = node->mSymbol;
+    Symbol* symbol = node->mSymbol;
 
+    // If this is a function or a syscall and we visit it, emit it as callable value.
+    if (symbol->mSymbolType == SymbolType::cFunction || symbol->mSymbolType == SymbolType::cSyscall)
+    {
+        emitIntegerImmediate(cNullRef);
+
+        VMWord entryToken = cInvalidFunctionEntryToken;
+        if (symbol->mSymbolType == SymbolType::cFunction)
+        {
+            entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(symbol->mIndex));
+        }
+        else
+        {
+            entryToken =
+                makeSyscallEntryToken(mCtx.mBackend.mFunctionInfos.size(), static_cast<SyscallIdx>(symbol->mIndex));
+        }
+
+        emit<OpCode::cPush32>(entryToken);
+
+        return true;
+    }
+
+    // If this is a constexpr, we can try to emit the value directly.
+    if (symbol->mFlags.test(SymbolFlags::cConstExpr))
+    {
         if (node->mResolvedType->mKind == TypeKind::cPrimitive)
         {
-            switch (s->mConstValue.mPrimitiveKind)
+            switch (symbol->mConstValue.mPrimitiveKind)
             {
                 case PrimitiveTypeKind::cInt:
                 {
                     // Don't emit more than we have to (i8/i16 if possible).
-                    emitIntegerImmediate(s->mConstValue.as.mInteger);
+                    emitIntegerImmediate(symbol->mConstValue.as.mInteger);
                     return true;
                 }
                 case PrimitiveTypeKind::cFloat:
                 {
                     // Push the float as u32.
-                    u32 val = bits::bitCast<u32>(s->mConstValue.as.mFloat);
+                    u32 val = bits::bitCast<u32>(symbol->mConstValue.as.mFloat);
                     emit<OpCode::cPush32>(val);
                     return true;
                 }
                 case PrimitiveTypeKind::cBool:
                 {
                     // Bools are 0 or 1.
-                    u8 val = (s->mConstValue.as.mBool) ? 1U : 0U;
+                    u8 val = (symbol->mConstValue.as.mBool) ? 1U : 0U;
                     emit<OpCode::cPush8>(val);
                     return true;
                 }
@@ -147,7 +168,7 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
                 {
                     // Register the string literal and use that index.
                     StringLiteralIdx stringIndex;
-                    if (mCtx.mBackend.mStrings.getLiteralIndex(s->mConstValue.as.mString, stringIndex) == false)
+                    if (mCtx.mBackend.mStrings.getLiteralIndex(symbol->mConstValue.as.mString, stringIndex) == false)
                     {
                         SIMLANG_BREAK("Constexpr string missing from string layout.");
                         return false;
@@ -307,10 +328,33 @@ bool CodeGenVisitor::visitFunctionCall(FunctionCallNode* node)
             return emitMapMethodCall(node, memberAccess);
         }
 
-        return emitMethodCall(node, memberAccess);
+        // If this is a normal function, emit a direct call.
+        if (memberAccess->mSymbol != nullptr && memberAccess->mSymbol->mSymbolType == SymbolType::cMemberFunction)
+        {
+            return emitMethodCall(node, memberAccess);
+        }
+
+        // Otherwise, this is a call to a field, so it is indirect.
+        return emitIndirectFunctionCall(node);
     }
 
-    return emitFreeFunctionOrSyscallCall(node);
+    Symbol* directSymbol = nullptr;
+    if (node->mReceiver->mNodeType == NodeType::cIdentifier)
+    {
+        directSymbol = static_cast<IdentifierNode*>(node->mReceiver)->mSymbol;
+    }
+    else if (node->mReceiver->mNodeType == NodeType::cModuleAccess)
+    {
+        directSymbol = static_cast<ModuleAccessNode*>(node->mReceiver)->mSymbol;
+    }
+
+    if (directSymbol != nullptr &&
+        (directSymbol->mSymbolType == SymbolType::cFunction || directSymbol->mSymbolType == SymbolType::cSyscall))
+    {
+        return emitFreeFunctionOrSyscallCall(node);
+    }
+
+    return emitIndirectFunctionCall(node);
 }
 
 bool CodeGenVisitor::visitIndexCall(IndexCallNode* node)
@@ -384,9 +428,9 @@ bool CodeGenVisitor::visitBinaryOp(BinaryOpNode* node)
     // Equality is defined for more types, so handle these here.
     if (node->mOp == BinaryOp::cEQ || node->mOp == BinaryOp::cNE)
     {
-        if (leftType->mKind == TypeKind::cStruct)
+        if (leftType->mKind == TypeKind::cFunction || leftType->mKind == TypeKind::cStruct)
         {
-            return emitStructEqualityOperands(node);
+            return emitEqualityOperands(node);
         }
 
         if (leftType->mKind == TypeKind::cInterface && rightType->mKind == TypeKind::cInterface)

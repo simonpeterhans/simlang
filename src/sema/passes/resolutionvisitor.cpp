@@ -549,6 +549,51 @@ bool ResolutionVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
     return true;
 }
 
+bool ResolutionVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node)
+{
+    //  If this is already resolved, bail.
+    if (node->mType != nullptr)
+    {
+        return true;
+    }
+
+    std::vector<FunctionParam> params;
+    params.reserve(node->mParams.size());
+
+    // Otherwise, resolve the param types.
+    for (FunctionTypeParameterSpecifier& param : node->mParams)
+    {
+        if (visit(param.mTypeSpecifier) == false)
+        {
+            return false;
+        }
+
+        // Check if something went wrong.
+        if (param.mTypeSpecifier->mType == nullptr)
+        {
+            return true;
+        }
+
+        params.push_back(FunctionParam{param.mTypeSpecifier->mType, param.mIsInOut});
+    }
+
+    // Resolve the return type spec.
+    if (visit(node->mReturnTypeSpecifier) == false)
+    {
+        return false;
+    }
+
+    // Also check for success before adding the function type.
+    if (node->mReturnTypeSpecifier->mType == nullptr)
+    {
+        return true;
+    }
+
+    node->mType = mCtx.mTypes.getOrAddFunction(node->mReturnTypeSpecifier->mType, params);
+
+    return true;
+}
+
 bool ResolutionVisitor::visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode*)
 {
     // We don't need to do anything here since the type is already resolved.

@@ -46,6 +46,7 @@ static bool isSupportedListElementType(Type* type)
         case TypeKind::cInterface:
         case TypeKind::cList:
         case TypeKind::cMap:
+        case TypeKind::cFunction:
         {
             return true;
         }
@@ -360,6 +361,66 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
         }
 
         return true;
+    }
+
+    return true;
+}
+
+bool TypeCheckVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node)
+{
+    std::vector<FunctionParam> paramTypes;
+    paramTypes.reserve(node->mParams.size());
+
+    bool valid = true;
+
+    // Check all params.
+    for (FunctionTypeParameterSpecifier& param : node->mParams)
+    {
+        TypeSpecifierNode* typeSpecifier = param.mTypeSpecifier;
+        if (visit(typeSpecifier) == false)
+        {
+            return false;
+        }
+
+        // This cannot be null or void.
+        Type* paramType =
+            requireValueType(typeSpecifier->mType, typeSpecifier->mSourceRange, "a function-type parameter");
+        typeSpecifier->mType = paramType;
+
+        if (isErrorType(paramType))
+        {
+            valid = false;
+        }
+
+        paramTypes.push_back(FunctionParam{paramType, param.mIsInOut});
+    }
+
+    // Resolve and validate the return type.
+    TypeSpecifierNode* returnTypeSpecifier = node->mReturnTypeSpecifier;
+    if (visit(returnTypeSpecifier) == false)
+    {
+        return false;
+    }
+
+    // This can be void, but not null.
+    Type* returnType = requireNonNullType(returnTypeSpecifier->mType,
+                                          returnTypeSpecifier->mSourceRange,
+                                          "a function-type return type");
+    returnTypeSpecifier->mType = returnType;
+
+    if (isErrorType(returnType))
+    {
+        valid = false;
+    }
+
+    if (valid == false)
+    {
+        // If we failed, don't add a new function type.
+        node->mType = getErrorType();
+    }
+    else
+    {
+        node->mType = mCtx.mTypes.getOrAddFunction(returnType, paramTypes);
     }
 
     return true;

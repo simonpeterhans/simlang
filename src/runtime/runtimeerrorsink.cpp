@@ -93,6 +93,11 @@ void TextRuntimeErrorSink::reportRuntimeError(const RuntimeError& error, const E
             out << " (syscall " << error.mValue0 << ")";
             break;
         }
+        case RuntimeErrorKind::cInvalidFunctionValue:
+        {
+            out << " (entry token " << static_cast<u64>(error.mValue0) << ")";
+            break;
+        }
         case RuntimeErrorKind::cInvalidCast:
         {
             if (error.mValue0 != 0 || error.mValue1 != 0)

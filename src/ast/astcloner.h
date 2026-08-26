@@ -391,6 +391,20 @@ public:
         return cloneNode<NamedTypeSpecifierNode>(n, nameExpression, makeArrayView(mAllocator, args));
     }
 
+    TypeSpecifierNode* cloneFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
+    {
+        std::vector<FunctionTypeParameterSpecifier> params;
+        params.reserve(n->mParams.size());
+        for (const FunctionTypeParameterSpecifier& param : n->mParams)
+        {
+            TypeSpecifierNode* typeSpecifier = cloneTypeSpecifier(param.mTypeSpecifier);
+            params.push_back(FunctionTypeParameterSpecifier{param.mSourceRange, typeSpecifier, param.mIsInOut});
+        }
+
+        TypeSpecifierNode* returnTypeSpecifier = cloneTypeSpecifier(n->mReturnTypeSpecifier);
+        return cloneNode<FunctionTypeSpecifierNode>(n, makeArrayView(mAllocator, params), returnTypeSpecifier);
+    }
+
     TypeSpecifierNode* cloneSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* n)
     {
         return cloneNode<SubstitutedTypeSpecifierNode>(n, n->mType);

@@ -46,6 +46,7 @@ static bool canOpReportRuntimeError(OpCode opCode)
     {
         case OpCode::cSyscall:
         case OpCode::cCall:
+        case OpCode::cCallValue:
         case OpCode::cCallMethod:
         case OpCode::cCallInterface:
         case OpCode::cFormatString:

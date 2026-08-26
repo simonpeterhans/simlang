@@ -130,8 +130,9 @@ private:
     bool emitInterfaceObjectRef(ExpressionNode* expr);
     bool emitInterfaceEqualityComparison(BinaryOp op, ExpressionNode* lhs, ExpressionNode* rhs);
     bool emitEqualityComparison(BinaryOp op, Type* type, const Place& lhs, const Place& rhs);
+    bool emitEqualityOperands(BinaryOpNode* node);
+    bool emitFunctionEqualityComparison(BinaryOp op, const Place& lhs, const Place& rhs);
     bool emitStructEqualityComparison(BinaryOp op, AggregateType* structType, const Place& lhs, const Place& rhs);
-    bool emitStructEqualityOperands(BinaryOpNode* node);
     bool emitArithmeticOrBitwiseOpcode(BinaryOp op, PrimitiveTypeKind resultKind);
     bool emitInterfaceConversion(Type* fromType, InterfaceType* toType);
     bool emitPrimitiveConversion(PrimitiveTypeKind fromKind, PrimitiveTypeKind toKind);
@@ -155,6 +156,7 @@ private:
     bool emitMapMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitFreeFunctionOrSyscallCall(FunctionCallNode* node);
+    bool emitIndirectFunctionCall(FunctionCallNode* node);
 
     // Object construction.
     bool emitNewList(NewObjectNode* node, ListType* listType);

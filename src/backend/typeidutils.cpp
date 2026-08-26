@@ -46,6 +46,11 @@ bool getRuntimeTypeID(Type* type, TypeID& out)
             out = cMapTypeID;
             return true;
         }
+        case TypeKind::cFunction:
+        {
+            out = cFunctionTypeID;
+            return true;
+        }
         case TypeKind::cStruct:
         case TypeKind::cClass:
         {
@@ -77,6 +82,7 @@ const char* getRuntimeBuiltinTypeIDName(TypeID id)
         case cStringTypeID: return "string";
         case cListTypeID: return "list";
         case cMapTypeID: return "map";
+        case cFunctionTypeID: return "function";
         default: return nullptr;
     }
 }

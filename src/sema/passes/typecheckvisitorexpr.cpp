@@ -53,8 +53,10 @@ bool TypeCheckVisitor::visitIdentifier(IdentifierNode* node)
         node->mFlags.set(cExprIsMutable, true);
     }
 
-    // If the symbol is a constexpr, mark the identifier node as such.
-    node->mFlags.set(cExprIsConstExpr, s->mFlags.test(SymbolFlags::cConstExpr));
+    // If we have a function value, a syscall value, or our symbol is a const expr already, mark us as such.
+    bool isConstExpr = s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall ||
+                       s->mFlags.test(SymbolFlags::cConstExpr);
+    node->mFlags.set(cExprIsConstExpr, isConstExpr);
 
     switch (s->mSymbolType)
     {
@@ -579,8 +581,10 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
 bool TypeCheckVisitor::visitFunctionCall(FunctionCallNode* node)
 {
     {
-        // We're now in a call (relevant for member access).
-        ScopedValueBinder cs{mInCall, true};
+        // Only the exact receiver may use call-only symbols such as methods. Tracking the entire
+        // receiver subtree as "in a call" would accidentally admit method values in a ternary or
+        // another compound expression.
+        ScopedValueBinder cs{mDirectCallReceiver, node->mReceiver};
 
         // Resolve the receiver.
         if (visit(node->mReceiver) == false)
@@ -806,7 +810,7 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         }
 
         // All of these are calls.
-        if (mInCall == false)
+        if (mDirectCallReceiver != node)
         {
             mCtx.report<cMethodAccessWithoutCall>(node->mSourceRange, node->mMember, typeToString(receiverType));
             markError(node);
@@ -874,7 +878,7 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         }
 
         // All of these are calls.
-        if (mInCall == false)
+        if (mDirectCallReceiver != node)
         {
             mCtx.report<cMethodAccessWithoutCall>(node->mSourceRange, node->mMember, typeToString(receiverType));
             markError(node);
@@ -953,7 +957,7 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
     node->mResolvedType = memberSymbol->mType;
 
     // Make sure this is not something like a.b where b is a method.
-    if (memberSymbol->mSymbolType == SymbolType::cMemberFunction && mInCall == false)
+    if (memberSymbol->mSymbolType == SymbolType::cMemberFunction && mDirectCallReceiver != node)
     {
         // We're accessing a method without calling it.
         mCtx.report<cMethodAccessWithoutCall>(node->mSourceRange,

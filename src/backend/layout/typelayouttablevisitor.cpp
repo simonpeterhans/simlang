@@ -35,6 +35,10 @@ TypeLayoutTableVisitor::TypeLayoutTableVisitor(CompilerContext& ctx)
 
     // Maps follow the same handle representation as lists.
     typeLayouts.setLayout(cMapTypeID, TypeLayout::pack(1, TypeLayout::Kind::cReference, 0, 0));
+
+    // Function values inline a context reference followed by an entry token.
+    TypeLayoutRefOffsetIndex functionRefOffset = typeLayouts.appendRefOffset(cFunctionValueContextWord);
+    typeLayouts.setLayout(cFunctionTypeID, TypeLayout::makeInlineValue(cFunctionValueWordCount, functionRefOffset, 1));
 }
 
 bool TypeLayoutTableVisitor::run(ASTNode* node)
@@ -95,6 +99,12 @@ bool TypeLayoutTableVisitor::collectRefsForField(Type* type, u32 baseOffsetWords
         {
             // Maps are heap references.
             fieldOffsets.push_back(baseOffsetWords);
+            return true;
+        }
+        case TypeKind::cFunction:
+        {
+            // Function values reserve their first word for a closure environment reference.
+            fieldOffsets.push_back(baseOffsetWords + cFunctionValueContextWord);
             return true;
         }
         case TypeKind::cStruct:

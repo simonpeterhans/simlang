@@ -61,6 +61,7 @@ public:
     bool visitParamDeclaration(ParamDeclarationNode* node);
 
     bool visitNamedTypeSpecifier(NamedTypeSpecifierNode* node);
+    bool visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node);
 
 private:
     // Type state.
@@ -115,10 +116,10 @@ private:
     FunctionDeclarationStatementNode* mCurrentFunction = nullptr;
     ModuleEntry* mCurrentModule = nullptr;
     Symbol* mCurrentTypeSymbol = nullptr;
+    ExpressionNode* mDirectCallReceiver = nullptr;
     std::unordered_set<Symbol*> mResolvingSymbols;
     i32 mBreakContextDepth = 0;
     i32 mContinueContextDepth = 0;
-    bool mInCall = false;
 };
 
 } // namespace simlang

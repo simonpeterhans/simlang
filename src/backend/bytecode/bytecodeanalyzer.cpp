@@ -216,6 +216,13 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             const FunctionInfo& function = mBackend.mFunctionInfos[index];
             return replaceStackWords(height, function.mArgWords, function.mReturnWords);
         }
+        case OpCode::cCallValue:
+        {
+            // Here, we also push the context and the value of the callable itself along with the args.
+            return replaceStackWords(height,
+                                     cFunctionValueWordCount + static_cast<u32>(op.as.mCallValue.mArgWords),
+                                     op.as.mCallValue.mReturnWords);
+        }
         case OpCode::cCallInterface:
         {
             const InterfaceCallInfo& info = mBackend.mInterfaceCallInfos[op.as.mCallInterface.mIndex];

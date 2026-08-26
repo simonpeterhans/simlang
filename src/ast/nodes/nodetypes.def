@@ -43,6 +43,7 @@ X( ParamDeclaration )
 
 // Type specifiers.
 X( NamedTypeSpecifier )
+X( FunctionTypeSpecifier )
 X( SubstitutedTypeSpecifier )
 
 // Misc.

@@ -29,61 +29,6 @@
 namespace simlang
 {
 
-static bool isHeapAddress(VMWord a)
-{
-    return (a & cHeapKindMask) == cHeapAddressTag;
-}
-
-static HeapIndex getHeapPayload(VMWord a)
-{
-    return a & cHeapPayloadMask;
-}
-
-static VMWord makeHeapAddress(HeapIndex heapIdx)
-{
-    return cHeapAddressTag | heapIdx;
-}
-
-static bool isGlobalRefAddress(VMWord a)
-{
-    return (a & cRefAddressKindMask) == cGlobalRefAddressTag;
-}
-
-static bool isStackRefAddress(VMWord a)
-{
-    return (a & cRefAddressKindMask) == cStackRefAddressTag;
-}
-
-static u32 getRefAddressIndex(VMWord a)
-{
-    return a & cRefAddressPayloadMask;
-}
-
-static VMWord makeGlobalRefAddress(u32 globalIdx)
-{
-    return cGlobalRefAddressTag | globalIdx;
-}
-
-static VMWord makeStackRefAddress(u32 stackIdx)
-{
-    return cStackRefAddressTag | stackIdx;
-}
-
-static bool isStaticStringHandle(VMWord a)
-{
-    return (a & cStaticStringTagMask) == cStaticStringTag;
-}
-
-static StringLiteralIdx getStaticStringLiteralIndex(VMWord a)
-{
-    return a & cStaticStringPayloadMask;
-}
-
-static VMWord makeStaticStringHandle(StringLiteralIdx index)
-{
-    return cStaticStringTag | index;
-}
-
 static void copyWords(VMWord* dst, const VMWord* src, u32 wordCount)
 {
     if (dst == src || wordCount == 0)
@@ -1493,6 +1438,145 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(CallValue)
+    {
+        // Code:  CallValue(argWords: OpWordCount, returnWords: ReturnWordCount)
+        // Stack: [argN-1, ..., arg0, entryToken, context, ...]
+        // Script target:  -> [localN-1, ..., local0, argN-1, ..., arg0, entryToken, context, ...]
+        // Syscall target: -> [retN-1, ..., ret0, ...]
+        // Get the arg words and return words.
+        OpWordCount argWords = readPC<OpWordCount>(pc);
+        ReturnWordCount returnWords = readPC<ReturnWordCount>(pc);
+
+        // From the arg words, derive where in the stack the args begin.
+        u32 stackSize = static_cast<u32>(sp - stackBase);
+        u32 argsBase = stackSize - static_cast<u32>(argWords);
+        // The callable base is right below the args.
+        u32 callableBase = argsBase - cFunctionValueWordCount;
+        // Get the entry token offset from the base.
+        VMWord entryToken = stackBase[callableBase + cFunctionValueEntryWord];
+
+        // Now look at the token value to see if it points to a valid function (or syscall).
+        bool hasEntry = entryToken != cInvalidFunctionEntryToken;
+        u64 rawEntryIndex = hasEntry ? decodeFunctionEntryToken(entryToken) : 0U;
+        u64 functionCount = mImage.mFunctionInfos.size();
+
+        if (hasEntry)
+        {
+            if (rawEntryIndex < functionCount)
+            {
+                // If we're here, this is trying to call a user-defined function.
+                FunctionIdx index = static_cast<FunctionIdx>(rawEntryIndex);
+                const FunctionInfo& fi = mImage.mFunctionInfos[index];
+
+                // Do the usual stack growing like a normal call does.
+                u64 requiredStackWords = static_cast<u64>(argsBase) + fi.mMaxStackWords;
+                if (requiredStackWords > stack.getCapacity())
+                {
+                    // Get the stack up to date since we might reallocate.
+                    STACK_SYNC();
+
+                    // Reserve the words and check for overflow.
+                    if (stack.reserve(requiredStackWords) == false)
+                    {
+                        reportStackOverflow(getRuntimeErrorAddress(pc, code), requiredStackWords);
+                        VM_END_OP_CHECKED();
+                    }
+
+                    // Reload the stack into the locals.
+                    STACK_RELOAD();
+                }
+
+                // Execute the call, same as for a normal call.
+                CallFrame frame;
+                frame.mFunctionIdx = index;
+                frame.mReturnPC = static_cast<VMAddress>(pc - code);
+                frame.mCallerFP = fp;
+                // Here, return values overwrite the context and the entry token.
+                frame.mCallerSP = callableBase;
+                mCallStack.push_back(frame);
+
+                pc = code + fi.mEntryAddress;
+                // Set the fp to the args base, so that it is the same for a normal call.
+                // The environment and the entry token remain accessible below for the duration of the call.
+                // (When returning, we still pop them as the caller SP is set to callableBase.)
+                fp = argsBase;
+                sp += fi.mLocalWords;
+
+                VM_END_OP();
+            }
+            else
+            {
+                // If we're here, this is trying to call a syscall.
+                u64 rawSyscallIndex = rawEntryIndex - functionCount;
+                if (rawSyscallIndex < mImage.mSyscallInfos.size())
+                {
+                    SyscallIdx syscallIndex = static_cast<SyscallIdx>(rawSyscallIndex);
+
+                    // Sync the stack before we call (in case the syscall manipulates the VM).
+                    STACK_SYNC();
+
+                    // Look up the syscall.
+                    const SyscallEntry& scEntry = mImage.mSyscallInfos[syscallIndex];
+                    // Call it.
+                    bool success = scEntry.mCaller(*this, scEntry);
+
+                    // Reload to make sure the stack is in sync.
+                    STACK_RELOAD();
+
+                    // Handle error stuff.
+                    if (success == false)
+                    {
+                        // We need to bail here, so it looks different from the syscall op but kinda does the same.
+                        // If we didn't halt already, do that now and complain.
+                        if (mHalted == false)
+                        {
+                            reportRuntimeError(getRuntimeErrorAddress(pc, code),
+                                               RuntimeErrorKind::cSyscallFailed,
+                                               syscallIndex);
+                            mHalted = true;
+                        }
+
+                        VM_END_OP_CHECKED();
+                    }
+
+                    // The call popped the args and pushed the return words, so our callable words are still there.
+                    // Move the return values over them.
+                    if (returnWords > 0)
+                    {
+                        std::memmove(stackBase + callableBase,
+                                     stackBase + argsBase,
+                                     static_cast<usize>(returnWords) * sizeof(VMWord));
+                    }
+
+                    // Our return words start now at callableBase, so the stack offset is that and returnWords.
+                    sp = stackBase + callableBase + returnWords;
+
+                    // End checked in case we halted.
+                    VM_END_OP_CHECKED();
+                }
+            }
+        }
+
+        // If we're here, something went wrong.
+        // To keep the stack in sync (if we're continuing), clean the stack by (implicitly) popping callable and args.
+        // Then, push the return words on (all 0s).
+        // To do that, first set our stack pointer to where we want the return words to be.
+        sp = stackBase + callableBase;
+        if (returnWords > 0)
+        {
+            // If we have any, zero them out.
+            std::memset(sp, 0, static_cast<usize>(returnWords) * sizeof(VMWord));
+            // Push them.
+            sp += returnWords;
+        }
+
+        // Don't forget to complain.
+        reportRuntimeError(getRuntimeErrorAddress(pc, code), RuntimeErrorKind::cInvalidFunctionValue, entryToken);
+
+        // If we halted, bail.
+        VM_END_OP_CHECKED();
+    }
     VM_OP(CallMethod)
     {
         // Code:  CallMethod(index: FunctionIdx)
@@ -1695,7 +1779,18 @@ bool VM::run()
             // This will result in the return values being on the new ToS.
             u32 currentSize = static_cast<u32>(sp - stackBase);
             u32 retBase = currentSize - retWords;
-            copyWords(stackBase + frame.mCallerSP, stackBase + retBase, retWords);
+            // Indirect-call results can overlap the two callable words they replace. Keep the
+            // existing small/non-overlapping fast path for ordinary returns.
+            if (frame.mCallerSP == retBase || frame.mCallerSP + retWords <= retBase)
+            {
+                copyWords(stackBase + frame.mCallerSP, stackBase + retBase, retWords);
+            }
+            else
+            {
+                std::memmove(stackBase + frame.mCallerSP,
+                             stackBase + retBase,
+                             static_cast<usize>(retWords) * sizeof(VMWord));
+            }
             // Shrink the stack accordingly.
             sp = stackBase + (frame.mCallerSP + retWords);
         }
