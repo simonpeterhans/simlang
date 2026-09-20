@@ -1463,6 +1463,7 @@ bool VM::run()
 
         if (hasEntry)
         {
+            // Identify whether this is a user-defined function or a syscall.
             if (rawEntryIndex < functionCount)
             {
                 // If we're here, this is trying to call a user-defined function.
@@ -1508,53 +1509,49 @@ bool VM::run()
             else
             {
                 // If we're here, this is trying to call a syscall.
-                u64 rawSyscallIndex = rawEntryIndex - functionCount;
-                if (rawSyscallIndex < mImage.mSyscallInfos.size())
+                SyscallIdx syscallIndex = static_cast<SyscallIdx>(rawEntryIndex - functionCount);
+
+                // Sync the stack before we call (in case the syscall manipulates the VM).
+                STACK_SYNC();
+
+                // Look up the syscall.
+                const SyscallEntry& scEntry = mImage.mSyscallInfos[syscallIndex];
+                // Call it.
+                bool success = scEntry.mCaller(*this, scEntry);
+
+                // Reload to make sure the stack is in sync.
+                STACK_RELOAD();
+
+                // Handle error stuff.
+                if (success == false)
                 {
-                    SyscallIdx syscallIndex = static_cast<SyscallIdx>(rawSyscallIndex);
-
-                    // Sync the stack before we call (in case the syscall manipulates the VM).
-                    STACK_SYNC();
-
-                    // Look up the syscall.
-                    const SyscallEntry& scEntry = mImage.mSyscallInfos[syscallIndex];
-                    // Call it.
-                    bool success = scEntry.mCaller(*this, scEntry);
-
-                    // Reload to make sure the stack is in sync.
-                    STACK_RELOAD();
-
-                    // Handle error stuff.
-                    if (success == false)
+                    // We need to bail here, so it looks different from the syscall op but kinda does the same.
+                    // If we didn't halt already, do that now and complain.
+                    if (mHalted == false)
                     {
-                        // We need to bail here, so it looks different from the syscall op but kinda does the same.
-                        // If we didn't halt already, do that now and complain.
-                        if (mHalted == false)
-                        {
-                            reportRuntimeError(getRuntimeErrorAddress(pc, code),
-                                               RuntimeErrorKind::cSyscallFailed,
-                                               syscallIndex);
-                            mHalted = true;
-                        }
-
-                        VM_END_OP_CHECKED();
+                        reportRuntimeError(getRuntimeErrorAddress(pc, code),
+                                           RuntimeErrorKind::cSyscallFailed,
+                                           syscallIndex);
+                        mHalted = true;
                     }
 
-                    // The call popped the args and pushed the return words, so our callable words are still there.
-                    // Move the return values over them.
-                    if (returnWords > 0)
-                    {
-                        std::memmove(stackBase + callableBase,
-                                     stackBase + argsBase,
-                                     static_cast<usize>(returnWords) * sizeof(VMWord));
-                    }
-
-                    // Our return words start now at callableBase, so the stack offset is that and returnWords.
-                    sp = stackBase + callableBase + returnWords;
-
-                    // End checked in case we halted.
                     VM_END_OP_CHECKED();
                 }
+
+                // The call popped the args and pushed the return words, so our callable words are still there.
+                // Move the return values over them.
+                if (returnWords > 0)
+                {
+                    std::memmove(stackBase + callableBase,
+                                 stackBase + argsBase,
+                                 static_cast<usize>(returnWords) * sizeof(VMWord));
+                }
+
+                // Our return words start now at callableBase, so the stack offset is that and returnWords.
+                sp = stackBase + callableBase + returnWords;
+
+                // End checked in case we halted.
+                VM_END_OP_CHECKED();
             }
         }
 
