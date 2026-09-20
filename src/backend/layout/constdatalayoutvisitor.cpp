@@ -127,7 +127,7 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
             // For function pointers (and lambdas), we only allow function or syscall types as global const value.
             Symbol* callable = value.as.mFunction;
             VMWord entryToken = cInvalidFunctionEntryToken;
-            if (callable->mSymbolType == SymbolType::cFunction)
+            if (callable->mSymbolType == SymbolType::cFunction || callable->mSymbolType == SymbolType::cLambda)
             {
                 entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(callable->mIndex));
             }
@@ -268,7 +268,10 @@ bool ConstDataLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarati
     // Special case to emit globals.
     if (node->mSymbol->mSymbolType == SymbolType::cGlobalVariable)
     {
-        return writeConstGlobalInitializer(node);
+        if (writeConstGlobalInitializer(node) == false)
+        {
+            return false;
+        }
     }
 
     return ASTWalker::visitVariableDeclarationStatement(node);

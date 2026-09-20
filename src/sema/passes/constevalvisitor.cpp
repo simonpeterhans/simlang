@@ -212,6 +212,18 @@ bool ConstEvalVisitor::visitThis(ThisNode*)
     return false;
 }
 
+bool ConstEvalVisitor::visitLambda(LambdaNode* node)
+{
+    // Lambdas with captures are... not const evaluable.
+    if (node->mCaptures.empty() == false)
+    {
+        return false;
+    }
+
+    mValue = ConstValue::makeFunction(node->mSymbol);
+    return true;
+}
+
 bool ConstEvalVisitor::visitIntLiteral(IntLiteralNode* node)
 {
     mValue = ConstValue::makeInteger(node->mInt);

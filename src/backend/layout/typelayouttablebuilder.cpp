@@ -20,22 +20,38 @@ void TypeLayoutTableBuilder::setLayout(TypeID id, const TypeLayout& layout)
     mLayouts[id] = layout;
 }
 
-TypeLayoutRefOffsetIndex TypeLayoutTableBuilder::appendRefOffset(TypeLayoutRefOffset offset)
+bool TypeLayoutTableBuilder::tryAppendRefOffsets(ArrayView<const u32> offsets,
+                                                 TypeLayoutRefOffsetIndex& outStart,
+                                                 u64& outRequiredIndex)
 {
-    TypeLayoutRefOffsetIndex refOffsetStart = static_cast<TypeLayoutRefOffsetIndex>(mRefOffsets.size());
-    mRefOffsets.push_back(offset);
-    return refOffsetStart;
-}
+    outStart = 0;
+    outRequiredIndex = 0;
 
-void TypeLayoutTableBuilder::setInterfaceType(TypeID id)
-{
-    TypeLayoutRefOffsetIndex refOffsetStart = appendRefOffset(0);
-    setLayout(id, TypeLayout::makeInlineValue(2, refOffsetStart, 1));
-}
+    if (offsets.empty())
+    {
+        return true;
+    }
 
-TypeLayoutRefOffsetIndex TypeLayoutTableBuilder::getRefOffsetCount() const
-{
-    return static_cast<TypeLayoutRefOffsetIndex>(mRefOffsets.size());
+    // See how big we need to grow our ref size array.
+    u64 requiredEnd = mRefOffsets.size() + offsets.size();
+    // Set the required size for diagnostic reasons in case we fail.
+    outRequiredIndex = requiredEnd - 1;
+
+    if (requiredEnd > cMaxTypeLayoutRefOffsetIndex + 1)
+    {
+        return false;
+    }
+
+    // Set the start index to the current size.
+    outStart = static_cast<TypeLayoutRefOffsetIndex>(mRefOffsets.size());
+
+    // Append stuff.
+    for (u32 offset : offsets)
+    {
+        mRefOffsets.push_back(static_cast<TypeLayoutRefOffset>(offset));
+    }
+
+    return true;
 }
 
 bool TypeLayoutTableBuilder::hasLayout(TypeID id) const

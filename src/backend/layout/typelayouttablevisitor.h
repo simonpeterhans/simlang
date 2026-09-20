@@ -19,6 +19,8 @@ public:
 
     bool run(ASTNode* node);
 
+    bool addLambdaEnvironmentLayouts();
+
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
 
 private:

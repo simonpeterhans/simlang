@@ -23,6 +23,7 @@ struct InterfaceType;
 struct ListType;
 struct MapType;
 struct Place;
+struct Symbol;
 struct Type;
 enum class AssignmentOp : u8;
 enum class BinaryOp : u8;
@@ -33,6 +34,8 @@ class CodeGenVisitor : public ASTWalker<CodeGenVisitor>
 {
 public:
     explicit CodeGenVisitor(CompilerContext& ctx);
+
+    bool emitLambdaBodies();
 
     void enterNode(ASTNode* node);
     void leaveNode(ASTNode*);
@@ -49,6 +52,7 @@ public:
     bool visitNullLiteral(NullLiteralNode* node);
     bool visitFormatString(FormatStringNode* node);
     bool visitNewObject(NewObjectNode* node);
+    bool visitLambda(LambdaNode* node);
     bool visitFunctionCall(FunctionCallNode* node);
     bool visitIndexCall(IndexCallNode* node);
     bool visitMemberAccess(MemberAccessNode* node);
@@ -113,6 +117,12 @@ private:
     bool emitTemporaryAddress(ExpressionNode* expr);
     bool emitAddress(ExpressionNode* expr, AddressMode mode);
 
+    const LambdaCapture* findCurrentCapture(Symbol* symbol) const;
+    const LambdaCapture* findCurrentThisCapture() const;
+    Type* getLambdaCaptureType(const LambdaNode* lambda, const LambdaCapture& capture) const;
+    void emitEnvironmentValue(const LambdaCapture& capture, Type* type);
+    bool emitLambdaCaptureValue(const LambdaNode* lambda, const LambdaCapture& capture);
+
     bool canFuseLValueAccess(ExpressionNode* expr);
     bool tryEmitFusedLoadFromLValue(ExpressionNode* expr);
     bool tryEmitFusedStoreIntoLValue(ExpressionNode* lhs, ExpressionNode* rhs);
@@ -176,6 +186,7 @@ private:
 
     FunctionInfo* mCurrentFunctionInfo = nullptr;
     AggregateType* mCurrentAggregateType = nullptr;
+    LambdaNode* mCurrentLambda = nullptr;
 };
 
 } // namespace simlang

@@ -30,6 +30,7 @@ private:
     bool doImports(ModuleEntry* module);
     bool doResolve(ModuleEntry* module);
     bool doThisRewrite(ModuleEntry* module);
+    bool doCaptureAnalysis(ModuleEntry* module);
     bool doTypeCheck(ModuleEntry* module);
     bool doConstFolding(ModuleEntry* module);
 

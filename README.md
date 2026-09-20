@@ -31,16 +31,16 @@ project (or keep in this implementation in the future).
 - Type templates for structs, classes, and interfaces
 - Modules and imports
 - Formatted strings
+- First-class functions and lambdas (copy by value)
 - Host-provided constants and syscalls (allowing primitives as well as list/map params/return values)
 
 ## Missing Features
 
-- Function pointers/lambdas (did not make up my mind about the design of this one yet)
 - Registering native types for VM use
 - Enums
 - Null-safety when accessing members of nullable references (out of scope for now)
-- Debugger (bytecode patching would easily be possible, but in my opinion the debugging options are also depending on
-  the embedding engine)
+- Debugger (bytecode patching would easily be possible, but in my opinion suitable debugging options are also depending
+  on the embedding engine)
 - ...
 
 ## Code Sample
@@ -107,6 +107,16 @@ fun main() : void
     }
 
     print(terrain.getInfo());
+
+    // Lambdas implicitly capture surrounding locals by value.
+    var capturedOffset = 1;
+    var addOffset = fun(value: int) : int
+    {
+        return value + capturedOffset;
+    };
+    
+    // Prints 3.
+    print(addOffset(2));
 }
 ```
 

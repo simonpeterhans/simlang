@@ -26,7 +26,7 @@
 namespace simlang
 {
 
-using FunctionScope = ScopedValueBinder<FunctionInfo*>;
+using FunctionScope = ScopedValueBinder<FunctionIdx>;
 
 SymbolLayoutVisitor::SymbolLayoutVisitor(CompilerContext& context)
     : mCtx(context)
@@ -40,6 +40,11 @@ bool SymbolLayoutVisitor::run(ASTNode* node)
     return traversalOk && mCtx.mDiag.hasNoErrorsSince(checkpoint);
 }
 
+FunctionInfo& SymbolLayoutVisitor::getCurrentFunction()
+{
+    return mCtx.mBackend.mFunctionInfos[mCurrentFunction];
+}
+
 bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     if (node->mSymbol->mSymbolType == SymbolType::cMemberVariable)
@@ -47,18 +52,13 @@ bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationS
         // For member variables we simply register the current member index.
         // The type layout already accounts for alignment.
         node->mSymbol->mIndex = static_cast<i32>(mNextMemberFieldIndex++);
-        return true;
+        return visit(node->mInit);
     }
 
     if (node->mSymbol->mSymbolType == SymbolType::cGlobalVariable)
     {
-        // Get the size and make sure it fits.
+        // Get the size.
         u32 globalWords = layout::getStorageWordSizeForType(node->mSymbol->mType);
-        if (globalWords > cMaxOpWordCount)
-        {
-            mCtx.report<cGlobalValueTooLarge>(node->mIdentifierRange, node->mIdentifier, globalWords, cMaxOpWordCount);
-            return false;
-        }
 
         u64 nextGlobalIdx = static_cast<u64>(mNextGlobalWordIndex) + globalWords;
         // nextIndex - 1 > cMaxGlobalIndex since nextIndex is exclusive.
@@ -75,7 +75,7 @@ bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationS
         // Push default values (0) for each word.
         mCtx.mBackend.mInitialGlobals.resize(mNextGlobalWordIndex, 0U);
 
-        return true;
+        return visit(node->mInit);
     }
 
     // Get the word size for the local.
@@ -83,8 +83,9 @@ bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationS
 
     // The opcodes treat args and locals as one consecutive index.
     // Thus, we need to offset by mArgWords (and account for that in the limit).
-    u64 maxLocalWords = std::min(cMaxFrameWords, (cMaxLocalIdx + 1) - mCurrentFunction->mArgWords);
-    u64 nextLocalWords = mCurrentFunction->mLocalWords + static_cast<u64>(localWords);
+    FunctionInfo& function = getCurrentFunction();
+    u64 maxLocalWords = std::min(cMaxFrameWords, (cMaxLocalIdx + 1) - function.mArgWords);
+    u64 nextLocalWords = function.mLocalWords + static_cast<u64>(localWords);
     if (nextLocalWords > maxLocalWords)
     {
         mCtx.report<cFunctionFrameTooLarge>(node->mIdentifierRange, nextLocalWords, "local", maxLocalWords);
@@ -92,12 +93,12 @@ bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationS
     }
 
     // The local starts at the current offset of arg and local words.
-    u32 localIndex = mCurrentFunction->mArgWords + mCurrentFunction->mLocalWords;
+    u32 localIndex = function.mArgWords + function.mLocalWords;
     node->mSymbol->mIndex = static_cast<i32>(localIndex);
     // We have more local words.
-    mCurrentFunction->mLocalWords = static_cast<FrameWordCount>(nextLocalWords);
+    function.mLocalWords = static_cast<FrameWordCount>(nextLocalWords);
 
-    return true;
+    return visit(node->mInit);
 }
 
 bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node)
@@ -109,7 +110,7 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
     }
 
     // Set the symbol's index.
-    usize functionIndex = mCtx.mBackend.mFunctionInfos.size();
+    FunctionIdx functionIndex = static_cast<FunctionIdx>(mCtx.mBackend.mFunctionInfos.size());
 
     node->mSymbol->mIndex = static_cast<i32>(functionIndex);
 
@@ -117,12 +118,12 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
     mCtx.mBackend.mFunctionInfos.emplace_back();
 
     // Bind the current function.
-    FunctionScope functionScope{mCurrentFunction, &mCtx.mBackend.mFunctionInfos.back()};
+    FunctionScope functionScope{mCurrentFunction, functionIndex};
 
     // If this is a member function, we need to account for "this" as an arg.
     if (node->mSymbol->mSymbolType == SymbolType::cMemberFunction)
     {
-        mCurrentFunction->mArgWords = 1;
+        getCurrentFunction().mArgWords = 1;
     }
 
     // Visit the params.
@@ -140,16 +141,9 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
         return false;
     }
 
-    // Make sure we fit into the return cap.
     auto* ft = static_cast<FunctionType*>(node->mSymbol->mType);
     u32 retWords = layout::getWordSizeForType(ft->mReturnType);
-    if (retWords > cMaxReturnWords)
-    {
-        mCtx.report<cFunctionFrameTooLarge>(node->mIdentifierRange, retWords, "return", cMaxReturnWords);
-        return false;
-    }
-
-    mCurrentFunction->mReturnWords = static_cast<ReturnWordCount>(retWords);
+    getCurrentFunction().mReturnWords = static_cast<ReturnWordCount>(retWords);
 
     // If this is main, validate that and track the index.
     if (node->mIdentifier == mCtx.mIdentifiers.getMainIdentifier())
@@ -169,9 +163,81 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
                 return false;
             }
 
-            mCtx.mBackend.mMainIndex = static_cast<FunctionIdx>(mCtx.mBackend.mFunctionInfos.size() - 1);
+            mCtx.mBackend.mMainIndex = functionIndex;
         }
     }
+
+    return true;
+}
+
+bool SymbolLayoutVisitor::visitLambda(LambdaNode* node)
+{
+    // Lay out the lambda stuff.
+    // Make a new function info for the lambda.
+    FunctionIdx functionIndex = static_cast<FunctionIdx>(mCtx.mBackend.mFunctionInfos.size());
+
+    node->mSymbol->mIndex = static_cast<i32>(functionIndex);
+    mCtx.mBackend.mFunctionInfos.emplace_back();
+    mCtx.mBackend.mLambdas.push_back(node);
+
+    if (node->mCaptures.empty() == false)
+    {
+        // If we have captures, we need to define an environment.
+        // The type ID may have to go from 16 to 32 bits in the future.
+        if (mCtx.mBackend.mNextTypeID > cMaxTypeID)
+        {
+            mCtx.report<cTooManyLambdaEnvironments>(node->mSourceRange, mCtx.mBackend.mNextTypeID, cMaxTypeID);
+            return false;
+        }
+
+        // Register as a new type.
+        node->mEnvironmentTypeID = mCtx.mBackend.mNextTypeID++;
+
+        // Count the words that the environment requires on the heap.
+        u64 environmentWords = 0;
+        for (LambdaCapture& capture : node->mCaptures)
+        {
+            // Update the offset while we're at it.
+            capture.mEnvironmentOffset = static_cast<u32>(environmentWords);
+            // If we have a symbol use its type, if we have "this" use the instance type that we stored in the node.
+            Type* captureType =
+                (capture.mKind == LambdaCaptureKind::cSymbol) ? capture.mSymbol->mType : node->mLexicalThisType;
+
+            // Don't grow too big.
+            u64 nextEnvironmentWords = environmentWords + layout::getStorageWordSizeForType(captureType);
+            if (nextEnvironmentWords > cMaxTypeLayoutWordCount)
+            {
+                mCtx.report<cLambdaEnvironmentTooLarge>(node->mSourceRange,
+                                                        nextEnvironmentWords,
+                                                        cMaxTypeLayoutWordCount);
+                return false;
+            }
+
+            environmentWords = nextEnvironmentWords;
+        }
+    }
+
+    // We handled all the capture offsets.
+    // Now make a scope and lay out the params and body.
+    FunctionScope functionScope{mCurrentFunction, functionIndex};
+
+    for (ParamNode* param : node->mParams)
+    {
+        if (visit(param) == false)
+        {
+            return false;
+        }
+    }
+
+    if (visit(node->mBody) == false)
+    {
+        return false;
+    }
+
+    auto* functionType = static_cast<FunctionType*>(node->mSymbol->mType);
+    u32 returnWords = layout::getWordSizeForType(functionType->mReturnType);
+    // Set the return words in the current function.
+    getCurrentFunction().mReturnWords = static_cast<ReturnWordCount>(returnWords);
 
     return true;
 }
@@ -239,7 +305,8 @@ bool SymbolLayoutVisitor::visitParamDeclaration(ParamDeclarationNode* node)
     }
 
     // I really doubt this will ever hit, but it's here anyway.
-    u64 nextArgWords = static_cast<u64>(mCurrentFunction->mArgWords) + words;
+    FunctionInfo& function = getCurrentFunction();
+    u64 nextArgWords = static_cast<u64>(function.mArgWords) + words;
     if (nextArgWords > cMaxFrameWords)
     {
         mCtx.report<cFunctionFrameTooLarge>(node->mIdentifierRange, nextArgWords, "argument", cMaxFrameWords);
@@ -247,8 +314,8 @@ bool SymbolLayoutVisitor::visitParamDeclaration(ParamDeclarationNode* node)
     }
 
     // The symbol index here is the param's offset on the stack.
-    node->mSymbol->mIndex = static_cast<i32>(mCurrentFunction->mArgWords);
-    mCurrentFunction->mArgWords = static_cast<FrameWordCount>(nextArgWords);
+    node->mSymbol->mIndex = static_cast<i32>(function.mArgWords);
+    function.mArgWords = static_cast<FrameWordCount>(nextArgWords);
 
     return true;
 }

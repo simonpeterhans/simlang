@@ -136,6 +136,7 @@ private:
     ExpressionNode* parseParen();
     ExpressionNode* parseMake();
     ExpressionNode* parseNew();
+    ExpressionNode* parseLambda();
     bool parseArgumentList(std::vector<CallArgument>& args);
     ExpressionNode* parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec);
     ExpressionNode* parseObjectConstruction(Token constructionToken,

@@ -14,6 +14,7 @@ enum class SymbolType : u8
     cGlobalVariable,
     cStackVariable,
     cFunction,
+    cLambda,
     cParameter,
     cStruct,
     cClass,
@@ -34,6 +35,7 @@ constexpr const char* symbolTypeToString(SymbolType type)
         case SymbolType::cGlobalVariable:   return "global variable";
         case SymbolType::cStackVariable:    return "stack variable";
         case SymbolType::cFunction:         return "function";
+        case SymbolType::cLambda:           return "lambda";
         case SymbolType::cParameter:        return "parameter";
         case SymbolType::cStruct:           return "struct";
         case SymbolType::cClass:            return "class";

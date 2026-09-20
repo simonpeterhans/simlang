@@ -101,18 +101,7 @@ bool SyscallRegistry::registerSyscall(CompilerContext& ctx,
         paramTypes.push_back(FunctionParam{paramType, false});
     }
 
-    if (argWords > cMaxOpWordCount)
-    {
-        ctx.report<cFunctionFrameTooLarge>(cInvalidSourceRange, argWords, "syscall argument", cMaxOpWordCount);
-        return false;
-    }
-
     u32 returnWords = getSyscallStackWords(templateData.mReturnType);
-    if (returnWords > cMaxReturnWords)
-    {
-        ctx.report<cFunctionFrameTooLarge>(cInvalidSourceRange, returnWords, "syscall return", cMaxReturnWords);
-        return false;
-    }
 
     FunctionType* functionType = tt.getOrAddFunction(returnType, paramTypes);
 

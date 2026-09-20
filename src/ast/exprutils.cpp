@@ -54,8 +54,9 @@ bool isAddressableExpression(ExpressionNode* expr)
         }
         case NodeType::cThis:
         {
-            // This is always a pointer and thus addressable.
-            return true;
+            // A struct method receives "this" as a borrowed storage address. A class
+            // method receives an object-reference value, whose binding is not addressable.
+            return hasValidResolvedType(expr) && expr->mResolvedType->mKind == TypeKind::cStruct;
         }
         case NodeType::cImplicitCast:
         case NodeType::cCast:

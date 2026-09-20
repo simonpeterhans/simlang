@@ -86,6 +86,11 @@ bool CodeGenVisitor::tryGetDirectPlace(ExpressionNode* expr, Place& out)
             auto* id = static_cast<IdentifierNode*>(expr);
             Symbol* s = id->mSymbol;
 
+            if (findCurrentCapture(s) != nullptr)
+            {
+                return false;
+            }
+
             if (s->mFlags.test(SymbolFlags::cInOut))
             {
                 // If this is an inout parameter, we cannot directly emit into it.
@@ -356,6 +361,12 @@ bool CodeGenVisitor::emitAddress(ExpressionNode* expr, AddressMode mode)
             auto* idNode = static_cast<IdentifierNode*>(expr);
             Symbol* s = idNode->mSymbol;
 
+            if (const LambdaCapture* capture = findCurrentCapture(s))
+            {
+                emit<OpCode::cRefCapture>(static_cast<FieldOffset>(capture->mEnvironmentOffset));
+                return true;
+            }
+
             // If this is an identifier, it can only be a reference.
             // All other addresses of direct identifiers are known at compile time.
             // (A local class variable is a direct place, so it will be handled earlier.)
@@ -432,7 +443,21 @@ bool CodeGenVisitor::emitAddress(ExpressionNode* expr, AddressMode mode)
         }
         case NodeType::cThis:
         {
-            // "this" is always local 0, so use that.
+            // Only struct receivers are addressable. Class receivers are object-reference
+            // values and whole-"this" rebinding is rejected during type checking.
+            if (expr->mResolvedType->mKind != TypeKind::cStruct)
+            {
+                return false;
+            }
+
+            if (const LambdaCapture* capture = findCurrentThisCapture())
+            {
+                FieldOffset offset = static_cast<FieldOffset>(capture->mEnvironmentOffset);
+                emit<OpCode::cRefCapture>(offset);
+                return true;
+            }
+
+            // A struct method's local 0 already contains its borrowed receiver address.
             emit<OpCode::cLoadLocal>(static_cast<LocalIdx>(0));
             return true;
         }

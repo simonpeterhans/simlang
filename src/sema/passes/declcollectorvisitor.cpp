@@ -84,8 +84,11 @@ bool DeclCollectorVisitor::visitForStatement(ForStatementNode* node)
         return false;
     }
 
-    // Skip condition (no work to do).
-    // Skip increment (no work to do).
+    // Expressions can contain lambdas, so visit the condition and increment as well.
+    if (visit(node->mCondition) == false || visit(node->mIncrement) == false)
+    {
+        return false;
+    }
 
     // Visit the body.
     if (visit(node->mBody) == false)
@@ -115,7 +118,7 @@ bool DeclCollectorVisitor::visitVariableDeclarationStatement(VariableDeclaration
     else
     {
         // Local variables are resolved after imports.
-        return true;
+        return visit(node->mInit);
     }
 
     // Check if this already exists.
@@ -154,9 +157,30 @@ bool DeclCollectorVisitor::visitVariableDeclarationStatement(VariableDeclaration
         mCurrentMemberList->push_back(symbol);
     }
 
-    // The initializer will be resolved later.
+    // The initializer is resolved later, but it can contain lambda scopes that need collecting now.
+    return visit(node->mInit);
+}
 
-    return true;
+bool DeclCollectorVisitor::visitLambda(LambdaNode* node)
+{
+    // Create the symbol for the lambda.
+    Symbol* symbol = mCtx.mSymbols.createSymbol(SymbolType::cLambda);
+
+    // Set symbol stuff for node and vice versa.
+    node->mSymbol = symbol;
+    symbol->mDeclNode = node;
+
+    // Bind the symbol.
+    SymbolScope symbolScope{mCurrentSymbol, symbol};
+    // Create a new scope.
+    ScopeGuard scopeGuard{mCtx.mScopes};
+
+    // Set the newly created scope for node and symbol
+    node->mScope = mCtx.mScopes.getCurrentScope();
+    symbol->mScope = node->mScope;
+
+    // Visit the lambda body.
+    return visit(node->mBody);
 }
 
 bool DeclCollectorVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node)

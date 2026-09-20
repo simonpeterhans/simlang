@@ -135,7 +135,8 @@ bool BackendDriver::doTypeLayoutMetadata()
         phase.finish(true);
     }
 
-    return true;
+    bool ret = visitor.addLambdaEnvironmentLayouts();
+    return ret;
 }
 
 bool BackendDriver::doCodeGen()
@@ -155,6 +156,11 @@ bool BackendDriver::doCodeGen()
         }
 
         phase.finish(true);
+    }
+
+    if (visitor.emitLambdaBodies() == false)
+    {
+        return false;
     }
 
     if (mCtx.mLog.isEnabled())

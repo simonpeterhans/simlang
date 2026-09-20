@@ -160,8 +160,7 @@ bool TypeCheckVisitor::visitThis(ThisNode* node)
 {
     node->mResolvedType = mCurrentTypeSymbol->mType;
 
-    // For now, "this" is always mutable.
-    node->mFlags.set(cExprIsLValue, true);
+    // "this" cannot be rebound, but mutable fields can still be changed through it.
     node->mFlags.set(cExprIsMutable, true);
 
     return true;

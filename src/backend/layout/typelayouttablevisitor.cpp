@@ -2,6 +2,7 @@
 
 #include "ast/nodes/stmtnodes.h"
 #include "backend/backendstate.h"
+#include "backend/layout/layout.h"
 #include "backend/layout/typelayouttablebuilder.h"
 #include "diag/diagnosticmanager.h"
 #include "diag/diagnostictype.h"
@@ -37,7 +38,11 @@ TypeLayoutTableVisitor::TypeLayoutTableVisitor(CompilerContext& ctx)
     typeLayouts.setLayout(cMapTypeID, TypeLayout::pack(1, TypeLayout::Kind::cReference, 0, 0));
 
     // Function values inline a context reference followed by an entry token.
-    TypeLayoutRefOffsetIndex functionRefOffset = typeLayouts.appendRefOffset(cFunctionValueContextWord);
+    static constexpr u32 cFunctionContextOffset = cFunctionValueContextWord;
+    TypeLayoutRefOffsetIndex functionRefOffset = 0;
+    u64 requiredIndex = 0;
+    typeLayouts.tryAppendRefOffsets(ArrayView{&cFunctionContextOffset, 1}, functionRefOffset, requiredIndex);
+
     typeLayouts.setLayout(cFunctionTypeID, TypeLayout::makeInlineValue(cFunctionValueWordCount, functionRefOffset, 1));
 }
 
@@ -46,6 +51,62 @@ bool TypeLayoutTableVisitor::run(ASTNode* node)
     DiagnosticCheckpoint checkpoint = mCtx.mDiag.createCheckpoint();
     bool traversalOk = visit(node);
     return traversalOk && mCtx.mDiag.hasNoErrorsSince(checkpoint);
+}
+
+bool TypeLayoutTableVisitor::addLambdaEnvironmentLayouts()
+{
+    // Like for class and struct fields, we need to build a layout for GC to know what to scan.
+    DiagnosticCheckpoint checkpoint = mCtx.mDiag.createCheckpoint();
+    TypeLayoutTableBuilder& typeLayouts = mCtx.mBackend.mTypeLayoutTable;
+
+    for (LambdaNode* lambda : mCtx.mBackend.mLambdas)
+    {
+        // We need captures for that.
+        if (lambda->mCaptures.empty())
+        {
+            continue;
+        }
+
+        // Go over all captures and collect the references for them in our offset vector.
+        std::vector<u32> offsets;
+        u32 environmentWords = 0;
+        for (const LambdaCapture& capture : lambda->mCaptures)
+        {
+            // Get the type as usual.
+            Type* captureType =
+                capture.mKind == LambdaCaptureKind::cSymbol ? capture.mSymbol->mType : lambda->mLexicalThisType;
+            if (collectRefsForField(captureType, capture.mEnvironmentOffset, offsets) == false)
+            {
+                return false;
+            }
+
+            // We (kinda) compute this twice (in the symbol layout visitor as well), but that's okay for now.
+            environmentWords = capture.mEnvironmentOffset + layout::getStorageWordSizeForType(captureType);
+        }
+
+        // Append any references we need to track.
+        TypeLayoutRefOffsetIndex refOffsetStart = 0;
+        u64 requiredIndex = 0;
+        if (typeLayouts.tryAppendRefOffsets(ArrayView<const u32>{offsets.data(), offsets.size()},
+                                            refOffsetStart,
+                                            requiredIndex) == false)
+        {
+            mCtx.report<cLambdaRefOffsetTableTooLarge>(lambda->mSourceRange,
+                                                       requiredIndex,
+                                                       cMaxTypeLayoutRefOffsetIndex);
+            continue;
+        }
+
+        // Get the environment ID and register it with the relevant meta data in the table.
+        TypeLayoutRefCount refCount = static_cast<TypeLayoutRefCount>(offsets.size());
+        TypeID environmentTypeID = static_cast<TypeID>(lambda->mEnvironmentTypeID);
+        TypeLayout layout = TypeLayout::makeReferenceObject(static_cast<TypeLayoutWordCount>(environmentWords),
+                                                            refOffsetStart,
+                                                            refCount);
+        typeLayouts.setLayout(environmentTypeID, layout);
+    }
+
+    return mCtx.mDiag.hasNoErrorsSince(checkpoint);
 }
 
 bool TypeLayoutTableVisitor::collectRefsForAggregate(AggregateType* agg, u32 baseWords, std::vector<u32>& fieldOffsets)
@@ -130,6 +191,7 @@ bool TypeLayoutTableVisitor::collectRefsForField(Type* type, u32 baseOffsetWords
 
 bool TypeLayoutTableVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNode* node)
 {
+    // We only need to handle template instantiations.
     if (node->isTemplate())
     {
         return true;
@@ -142,11 +204,14 @@ bool TypeLayoutTableVisitor::visitTypeDeclarationStatement(TypeDeclarationStatem
     {
         // If this is an interface, register the index as type ID.
         TypeID typeID = static_cast<TypeID>(node->mSymbol->mIndex);
-        TypeLayoutRefOffsetIndex refOffsetStart = typeLayouts.getRefOffsetCount();
-        u64 requiredEnd = static_cast<u64>(refOffsetStart) + 1U;
-        if (requiredEnd > cMaxTypeLayoutRefOffsetIndex + 1)
+        // The interface value consists of object reference & interface dispatch index.
+        // We're interested in the first word for GC, hence we need to track the word at 0.
+        static constexpr u32 cInterfaceObjectOffset = 0;
+        TypeLayoutRefOffsetIndex refOffsetStart = 0;
+        u64 requiredIndex = 0;
+        if (typeLayouts.tryAppendRefOffsets(ArrayView{&cInterfaceObjectOffset, 1}, refOffsetStart, requiredIndex) ==
+            false)
         {
-            u64 requiredIndex = requiredEnd - 1;
             mCtx.report<cTypeLayoutRefOffsetTableTooLarge>(node->mIdentifierRange,
                                                            node->mIdentifier,
                                                            requiredIndex,
@@ -154,16 +219,20 @@ bool TypeLayoutTableVisitor::visitTypeDeclarationStatement(TypeDeclarationStatem
             return false;
         }
 
-        typeLayouts.setInterfaceType(typeID);
+        // Write the layout metadata.
+        // 2 words, the offset start computed just before, for 1 ref.
+        TypeLayout layout = TypeLayout::makeInlineValue(2, refOffsetStart, 1);
+        typeLayouts.setLayout(typeID, layout);
+
         return true;
     }
 
     auto* agg = static_cast<AggregateType*>(t);
     TypeID typeID = static_cast<TypeID>(node->mSymbol->mIndex);
     u32 rawLayoutSizeWords = agg->mLayout->mSize;
-    SIMLANG_ASSERTM(rawLayoutSizeWords <= cMaxTypeLayoutWordCount,
-                    "Type layout exceeded packed word count after aggregate layout.");
 
+    // We currently allow empty classes; if we have that, register a dummy word.
+    // This is perhaps a bit messy and should rather go elsewhere.
     TypeLayoutWordCount layoutSizeWords = static_cast<TypeLayoutWordCount>(rawLayoutSizeWords);
     if (rawLayoutSizeWords == 0)
     {
@@ -181,48 +250,29 @@ bool TypeLayoutTableVisitor::visitTypeDeclarationStatement(TypeDeclarationStatem
         }
     }
 
-    // We collected all offsets that have to be checked for this type.
-    // Register the offsets.
+    // Register the collected reference offsets for this type.
     TypeLayoutRefOffsetIndex refOffsetStart = 0;
-    SIMLANG_ASSERTM(offsets.size() <= cMaxTypeLayoutRefCount,
-                    "Type layout reference count exceeded packed ref count after aggregate layout.");
-
-    for (u32 offset : offsets)
+    u64 requiredIndex = 0;
+    if (typeLayouts.tryAppendRefOffsets(ArrayView<const u32>{offsets.data(), offsets.size()},
+                                        refOffsetStart,
+                                        requiredIndex) == false)
     {
-        SIMLANG_ASSERTM(offset <= cMaxTypeLayoutRefOffset,
-                        "Type layout reference offset exceeded packed ref offset after aggregate layout.");
-    }
-
-    TypeLayoutRefCount offsetCount = static_cast<TypeLayoutRefCount>(offsets.size());
-
-    if (offsetCount > 0)
-    {
-        refOffsetStart = typeLayouts.getRefOffsetCount();
-        u64 requiredEnd = static_cast<u64>(refOffsetStart) + offsetCount;
-        if (requiredEnd > cMaxTypeLayoutRefOffsetIndex + 1)
-        {
-            u64 requiredIndex = requiredEnd - 1;
-            mCtx.report<cTypeLayoutRefOffsetTableTooLarge>(node->mIdentifierRange,
-                                                           node->mIdentifier,
-                                                           requiredIndex,
-                                                           cMaxTypeLayoutRefOffsetIndex);
-            return false;
-        }
-
-        for (u32 offset : offsets)
-        {
-            typeLayouts.appendRefOffset(static_cast<TypeLayoutRefOffset>(offset));
-        }
+        mCtx.report<cTypeLayoutRefOffsetTableTooLarge>(node->mIdentifierRange,
+                                                       node->mIdentifier,
+                                                       requiredIndex,
+                                                       cMaxTypeLayoutRefOffsetIndex);
+        return false;
     }
 
     // Build the type layout.
+    TypeLayoutRefCount refCount = static_cast<TypeLayoutRefCount>(offsets.size());
     if (t->mKind == TypeKind::cStruct)
     {
-        typeLayouts.setLayout(typeID, TypeLayout::makeStruct(layoutSizeWords, refOffsetStart, offsetCount));
+        typeLayouts.setLayout(typeID, TypeLayout::makeStruct(layoutSizeWords, refOffsetStart, refCount));
     }
     else
     {
-        typeLayouts.setLayout(typeID, TypeLayout::makeReferenceObject(layoutSizeWords, refOffsetStart, offsetCount));
+        typeLayouts.setLayout(typeID, TypeLayout::makeReferenceObject(layoutSizeWords, refOffsetStart, refCount));
     }
 
     return true;

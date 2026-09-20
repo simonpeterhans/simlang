@@ -124,6 +124,20 @@ public:
                                         n->mConstructionKind);
     }
 
+    ExpressionNode* cloneLambda(LambdaNode* n)
+    {
+        std::vector<ParamNode*> params;
+        params.reserve(n->mParams.size());
+        for (ParamNode* param : n->mParams)
+        {
+            params.push_back(cloneParam(param));
+        }
+
+        TypeSpecifierNode* returnTypeSpec = cloneTypeSpecifier(n->mReturnTypeSpec);
+        StatementNode* body = cloneStatement(n->mBody);
+        return cloneNode<LambdaNode>(n, makeArrayView(mAllocator, params), returnTypeSpec, body);
+    }
+
     ExpressionNode* cloneFunctionCall(FunctionCallNode* n)
     {
         std::vector<CallArgument> args;

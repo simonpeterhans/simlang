@@ -311,6 +311,13 @@ bool TypeCheckVisitor::requireAssignableLValue(ExpressionNode* expr, bool allowI
         return true;
     }
 
+    // "this" is a receiver, not a rebindable variable.
+    if (expr->mNodeType == NodeType::cThis)
+    {
+        mCtx.report<cCannotRebindThis>(expr->mSourceRange);
+        return false;
+    }
+
     // Check the lvalue flag.
     if (expr->mFlags.test(cExprIsLValue) == false)
     {

@@ -258,8 +258,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cPushString:
         case OpCode::cRefLocal:
         case OpCode::cRefGlobal:
+        case OpCode::cRefCapture:
         case OpCode::cLoadLocal:
         case OpCode::cLoadGlobal:
+        case OpCode::cLoadCapture:
         case OpCode::cNewObject:
         case OpCode::cNewList:
         case OpCode::cNewMap:
@@ -285,6 +287,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cLoadGlobalN:
         {
             return pushStackWords(height, op.as.mLoadGlobalN.mSize);
+        }
+        case OpCode::cLoadCaptureN:
+        {
+            return pushStackWords(height, op.as.mLoadCaptureN.mSize);
         }
         case OpCode::cLoadRefN:
         {

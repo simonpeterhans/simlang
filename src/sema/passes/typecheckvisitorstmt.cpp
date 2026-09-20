@@ -31,6 +31,23 @@ namespace simlang
 static constexpr std::string_view cListTypeName = "list";
 static constexpr std::string_view cMapTypeName = "map";
 
+static bool bodyEndsWithReturn(StatementNode* body)
+{
+    if (body->mNodeType == NodeType::cReturnStatement)
+    {
+        return true;
+    }
+
+    if (body->mNodeType != NodeType::cBlockStatement)
+    {
+        return false;
+    }
+
+    auto* block = static_cast<BlockStatementNode*>(body);
+    return (block->mStatements.empty() == false) &&
+           (block->mStatements.back()->mNodeType == NodeType::cReturnStatement);
+}
+
 static bool isSupportedListElementType(Type* type)
 {
     if (type == nullptr)
@@ -215,23 +232,70 @@ bool TypeCheckVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStat
     if (node->mBody != nullptr && isErrorType(functionReturnType) == false &&
         getPrimitiveKind(functionReturnType) != PrimitiveTypeKind::cVoid)
     {
-        bool endsWithReturn = (node->mBody->mNodeType == NodeType::cReturnStatement);
-
-        // If this is a block, check whether the last statement is a return.
-        // For now, this is good enough to enforce.
-        if (node->mBody->mNodeType == NodeType::cBlockStatement)
-        {
-            auto* block = static_cast<BlockStatementNode*>(node->mBody);
-            endsWithReturn = block->mStatements.empty() == false &&
-                             block->mStatements.back()->mNodeType == NodeType::cReturnStatement;
-        }
-
-        if (endsWithReturn == false)
+        if (bodyEndsWithReturn(node->mBody) == false)
         {
             mCtx.report<cMissingReturnStatement>(node->mIdentifierRange,
                                                  node->mIdentifier,
                                                  typeToString(functionReturnType));
         }
+    }
+
+    return true;
+}
+
+bool TypeCheckVisitor::visitLambda(LambdaNode* node)
+{
+    // Resolve the return type.
+    if (visit(node->mReturnTypeSpec) == false)
+    {
+        return false;
+    }
+
+    Type* returnType =
+        requireNonNullType(node->mReturnTypeSpec->mType, node->mReturnTypeSpec->mSourceRange, "a lambda return type");
+    node->mReturnTypeSpec->mType = returnType;
+
+    // Resolve the params.
+    std::vector<FunctionParam> paramTypes;
+    paramTypes.reserve(node->mParams.size());
+
+    for (ParamNode* param : node->mParams)
+    {
+        if (visit(param) == false)
+        {
+            return false;
+        }
+
+        auto* paramDecl = static_cast<ParamDeclarationNode*>(param);
+        paramTypes.push_back(FunctionParam{paramDecl->mSymbol->mType, paramDecl->mIsInOut});
+    }
+
+    // Create the function (lambda) type based on the return and param types we obtained.
+    node->mSymbol->mType = mCtx.mTypes.getOrAddFunction(returnType, paramTypes);
+    // Resolve the type.
+    node->mResolvedType = node->mSymbol->mType;
+    // If we are in a method, also register the type of the object so "this" can easily be typed.
+    node->mLexicalThisType = mCurrentTypeSymbol == nullptr ? nullptr : mCurrentTypeSymbol->mType;
+    // If we have no captures, this can be constexpr.
+    node->mFlags.set(cExprIsConstExpr, node->mCaptures.empty());
+
+    // Create all the scopes before processing the body.
+    ScopedValueBinder returnTypeScope{mCurrentReturnType, returnType};
+    ScopedValueBinder breakScope{mBreakContextDepth, 0};
+    ScopedValueBinder continueScope{mContinueContextDepth, 0};
+    ScopedValueBinder<FunctionDeclarationStatementNode*> functionScope{mCurrentFunction, nullptr};
+
+    // Process the body.
+    if (visit(node->mBody) == false)
+    {
+        return false;
+    }
+
+    // Like for functions, we also expect a return here.
+    if (isErrorType(returnType) == false && getPrimitiveKind(returnType) != PrimitiveTypeKind::cVoid &&
+        bodyEndsWithReturn(node->mBody) == false)
+    {
+        mCtx.report<cMissingLambdaReturn>(node->mSourceRange, typeToString(returnType));
     }
 
     return true;

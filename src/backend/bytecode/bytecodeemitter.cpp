@@ -50,6 +50,9 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cCallMethod:
         case OpCode::cCallInterface:
         case OpCode::cFormatString:
+        case OpCode::cRefCapture:
+        case OpCode::cLoadCapture:
+        case OpCode::cLoadCaptureN:
         case OpCode::cRefObjField:
         case OpCode::cLoadObjField:
         case OpCode::cLoadObjFieldN:

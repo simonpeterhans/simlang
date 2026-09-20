@@ -26,6 +26,7 @@ public:
     bool visitNullLiteral(NullLiteralNode*);
     bool visitFormatString(FormatStringNode* node);
     bool visitNewObject(NewObjectNode*);
+    bool visitLambda(LambdaNode* node);
     bool visitFunctionCall(FunctionCallNode* node);
     bool visitIndexCall(IndexCallNode*);
     bool visitMemberAccess(MemberAccessNode*);

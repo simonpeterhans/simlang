@@ -14,6 +14,7 @@ class SourceRange;
 class TextWriter;
 struct BytecodeDumpOptions;
 struct CompilerContext;
+struct LambdaNode;
 struct Op;
 struct StringFormatTemplate;
 struct Symbol;
@@ -40,6 +41,7 @@ private:
     const Symbol* getFunctionSymbol(FunctionIdx index) const;
     const Symbol* getSyscallSymbol(SyscallIdx index) const;
     const Symbol* getTypeSymbol(TypeID index) const;
+    const LambdaNode* getLambdaEnvironment(TypeID index) const;
 
     std::string getQualifiedSymbolName(const Symbol* symbol) const;
     std::string getFunctionName(FunctionIdx index) const;
@@ -64,6 +66,7 @@ private:
     void writeRawBytecode();
 
     void writeFormatTemplate(const StringFormatTemplate& tmpl);
+    void writeTypeLayout(TypeID typeID);
     void writeRefOffsets(const TypeLayout& layout);
     void writeTypeMembers(const Symbol* symbol);
 
@@ -74,6 +77,7 @@ private:
     std::vector<const Symbol*> mFunctionSymbols;
     std::vector<const Symbol*> mSyscallSymbols;
     std::vector<const Symbol*> mTypeSymbols;
+    std::vector<const LambdaNode*> mLambdaEnvironments;
     std::vector<const Symbol*> mOwnerSymbols;
 };
 

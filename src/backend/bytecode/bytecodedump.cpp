@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ast/nodes/astnode.h"
+#include "ast/nodes/exprnodes.h"
 #include "ast/nodes/nodetypes.h"
 #include "ast/nodes/stmtnodes.h"
 #include "backend/backendstate.h"
@@ -87,13 +88,23 @@ bool isFunctionSymbol(const Symbol* symbol)
         return false;
     }
 
-    return symbol->mSymbolType == SymbolType::cFunction || symbol->mSymbolType == SymbolType::cMemberFunction;
+    return symbol->mSymbolType == SymbolType::cFunction || symbol->mSymbolType == SymbolType::cLambda ||
+           symbol->mSymbolType == SymbolType::cMemberFunction;
 }
 
 bool hasFunctionBody(const Symbol* symbol)
 {
-    if (symbol == nullptr || symbol->mDeclNode == nullptr ||
-        symbol->mDeclNode->mNodeType != NodeType::cFunctionDeclarationStatement)
+    if (symbol == nullptr || symbol->mDeclNode == nullptr)
+    {
+        return false;
+    }
+
+    if (symbol->mDeclNode->mNodeType == NodeType::cLambda)
+    {
+        return true;
+    }
+
+    if (symbol->mDeclNode->mNodeType != NodeType::cFunctionDeclarationStatement)
     {
         return false;
     }
@@ -240,6 +251,7 @@ void BytecodeDump::buildSymbolIndex()
     mFunctionSymbols.resize(mCtx.mBackend.mFunctionInfos.size());
     mSyscallSymbols.resize(mCtx.mBackend.mSyscallInfos.size());
     mTypeSymbols.resize(mCtx.mBackend.mNextTypeID);
+    mLambdaEnvironments.resize(mCtx.mBackend.mNextTypeID);
     mOwnerSymbols.resize(mCtx.mSymbols.getSymbols().size());
 
     // Index every symbol by the runtime/backend index that is relevant for its kind.
@@ -254,6 +266,14 @@ void BytecodeDump::buildSymbolIndex()
         indexSyscallSymbol(symbol);
         indexTypeSymbol(symbol);
         indexMemberOwners(symbol);
+    }
+
+    for (const LambdaNode* lambda : mCtx.mBackend.mLambdas)
+    {
+        if (lambda->mCaptures.empty() == false)
+        {
+            mLambdaEnvironments[lambda->mEnvironmentTypeID] = lambda;
+        }
     }
 }
 
@@ -350,6 +370,11 @@ const Symbol* BytecodeDump::getTypeSymbol(TypeID index) const
     return getIndexedSymbol(mTypeSymbols, index);
 }
 
+const LambdaNode* BytecodeDump::getLambdaEnvironment(TypeID index) const
+{
+    return mLambdaEnvironments[index];
+}
+
 std::string BytecodeDump::getQualifiedSymbolName(const Symbol* symbol) const
 {
     if (symbol == nullptr)
@@ -389,12 +414,12 @@ std::string BytecodeDump::getTypeName(TypeID index) const
     }
 
     const Symbol* symbol = getTypeSymbol(index);
-    if (symbol == nullptr)
+    if (symbol != nullptr)
     {
-        return "<unknown>";
+        return std::string{getSymbolName(symbol)};
     }
 
-    return std::string{getSymbolName(symbol)};
+    return getLambdaEnvironment(index) == nullptr ? "<unknown>" : "<lambda-env>";
 }
 
 void BytecodeDump::writeSymbolRef(const Symbol* symbol)
@@ -670,15 +695,40 @@ void BytecodeDump::writeTypeTable()
 {
     mOut << "== types ==\n";
 
-    // mTypeSymbols is indexed by type ID, so iteration naturally prints type-ID order.
-    for (const Symbol* symbol : mTypeSymbols)
+    // The symbol/environment arrays are indexed by type ID, so iteration naturally prints type-ID order.
+    for (usize i = 0; i < mTypeSymbols.size(); ++i)
     {
-        if (symbol == nullptr || isTypeSymbol(symbol) == false || symbol->mIndex < 0)
+        TypeID typeID = static_cast<TypeID>(i);
+        const Symbol* symbol = mTypeSymbols[i];
+        const LambdaNode* lambda = mLambdaEnvironments[i];
+
+        if (symbol == nullptr)
         {
+            if (lambda == nullptr)
+            {
+                continue;
+            }
+
+            mOut << "\n[type=" << typeID << "] <lambda-env> synthetic\n";
+            mOut << "  lambda: ";
+            writeSymbolRef(lambda->mSymbol);
+            mOut << "\n";
+            writeDeclLocation(lambda->mSymbol);
+            mOut << "  captures:\n";
+            for (usize captureIndex = 0; captureIndex < lambda->mCaptures.size(); ++captureIndex)
+            {
+                const LambdaCapture& capture = lambda->mCaptures[captureIndex];
+                Type* captureType =
+                    capture.mKind == LambdaCaptureKind::cSymbol ? capture.mSymbol->mType : lambda->mLexicalThisType;
+                mOut << "    [" << captureIndex << "] "
+                     << (capture.mKind == LambdaCaptureKind::cThis ? "this" : getSymbolName(capture.mSymbol)) << " : "
+                     << typeToString(captureType) << " words=" << layout::getStorageWordSizeForType(captureType)
+                     << " offset=" << capture.mEnvironmentOffset << "\n";
+            }
+            writeTypeLayout(typeID);
             continue;
         }
 
-        TypeID typeID = static_cast<TypeID>(symbol->mIndex);
         mOut << "\n[type=" << typeID << "] " << getSymbolName(symbol) << " " << symbolTypeToString(symbol->mSymbolType)
              << "\n";
         mOut << "  symbol: ";
@@ -693,14 +743,7 @@ void BytecodeDump::writeTypeTable()
 
         writeDeclLocation(symbol);
 
-        if (mCtx.mBackend.mTypeLayoutTable.hasLayout(typeID))
-        {
-            const TypeLayout& layout = mCtx.mBackend.mTypeLayoutTable.getLayout(typeID);
-            mOut << "  layout: kind=" << getTypeLayoutKindName(layout.getKind()) << ", words=" << layout.getWordCount()
-                 << ", refs=" << layout.getRefCount() << ", ref-offset-start=" << layout.getRefOffsetStartIndex()
-                 << "\n";
-            writeRefOffsets(layout);
-        }
+        writeTypeLayout(typeID);
 
         writeTypeMembers(symbol);
     }
@@ -824,6 +867,19 @@ void BytecodeDump::writeFormatTemplate(const StringFormatTemplate& tmpl)
         mOut << stringFormatArgKindToString(tmpl.mArgKinds[i]);
     }
     mOut << "]";
+}
+
+void BytecodeDump::writeTypeLayout(TypeID typeID)
+{
+    if (mCtx.mBackend.mTypeLayoutTable.hasLayout(typeID) == false)
+    {
+        return;
+    }
+
+    const TypeLayout& layout = mCtx.mBackend.mTypeLayoutTable.getLayout(typeID);
+    mOut << "  layout: kind=" << getTypeLayoutKindName(layout.getKind()) << ", words=" << layout.getWordCount()
+         << ", refs=" << layout.getRefCount() << ", ref-offset-start=" << layout.getRefOffsetStartIndex() << "\n";
+    writeRefOffsets(layout);
 }
 
 void BytecodeDump::writeRefOffsets(const TypeLayout& layout)

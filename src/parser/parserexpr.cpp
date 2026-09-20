@@ -89,6 +89,7 @@ struct TypeSpecifierNode;
     set(TokenType::cThis,        &Parser::parseThis,                   nullptr,                    Precedence::cNone);
     set(TokenType::cMake,        &Parser::parseMake,                   nullptr,                    Precedence::cUnaryPost);
     set(TokenType::cNew,         &Parser::parseNew,                    nullptr,                    Precedence::cUnaryPost);
+    set(TokenType::cFun,         &Parser::parseLambda,                 nullptr,                    Precedence::cNone);
 
     set(TokenType::cInt,         &Parser::parseInt,                    nullptr,                    Precedence::cNone);
     set(TokenType::cFloat,       &Parser::parseFloat,                  nullptr,                    Precedence::cNone);
@@ -179,7 +180,7 @@ ExpressionNode* Parser::parseCast()
     TypeSpecifierNode* typeSpec = nullptr;
     {
         auto splitRightAngles = mTokenizer.scopedSplitRightAngles(true);
-        // Consume the "<".
+        // Consume the '<'.
         if (expect(TokenType::cLT, nullptr, true) == false)
         {
             return nullptr;
@@ -192,14 +193,14 @@ ExpressionNode* Parser::parseCast()
             return nullptr;
         }
 
-        // Consume the ">".
+        // Consume the '>'.
         if (expect(TokenType::cGT, nullptr, true) == false)
         {
             return nullptr;
         }
     }
 
-    // Consume the "(".
+    // Consume the '('.
     if (expect(TokenType::cLeftParen, nullptr, true) == false)
     {
         return nullptr;
@@ -212,13 +213,90 @@ ExpressionNode* Parser::parseCast()
         return nullptr;
     }
 
-    // Consume the ")".
+    // Consume the ')'.
     if (expect(TokenType::cRightParen, nullptr, true) == false)
     {
         return nullptr;
     }
 
     return mCtx.create<CastNode>(makeRangeToPrevious(castToken), typeSpec, child);
+}
+
+ExpressionNode* Parser::parseLambda()
+{
+    // Consume the "fun".
+    Token funToken = consume();
+    std::vector<ParamNode*> params;
+    params.reserve(8);
+
+    // Consume the '('.
+    if (expect(TokenType::cLeftParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Consume params until we have a ')'.
+    while (check(TokenType::cRightParen) == false)
+    {
+        // If we already parsed one param, we need a ','.
+        if (params.empty() == false)
+        {
+            // Consume the ',' before every param except the first.
+            if (tryConsume(TokenType::cComma) == false)
+            {
+                mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
+                                              std::array{TokenType::cComma, TokenType::cRightParen},
+                                              getCurrentTokenText());
+                return nullptr;
+            }
+        }
+
+        // Parse the param.
+        ParamNode* param = parseFunctionParameter();
+        if (param == nullptr)
+        {
+            return nullptr;
+        }
+        params.push_back(param);
+    }
+
+    // Consume the ')'.
+    if (expect(TokenType::cRightParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Consume the ':'.
+    if (expect(TokenType::cColon, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Parse the return type.
+    TypeSpecifierNode* returnTypeSpec = parseTypeSpec();
+    if (returnTypeSpec == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Expect a block start.
+    if (check(TokenType::cLeftBrace) == false)
+    {
+        mCtx.report<cUnexpectedToken>(getCurrentTokenRange(), TokenType::cLeftBrace, getCurrentTokenText());
+        return nullptr;
+    }
+
+    // Parse the body.
+    StatementNode* body = parseBlock();
+    if (body == nullptr)
+    {
+        return nullptr;
+    }
+
+    return mCtx.create<LambdaNode>(makeRangeToPrevious(funToken),
+                                   makeArrayView(mCtx.mAllocator, params),
+                                   returnTypeSpec,
+                                   body);
 }
 
 bool Parser::parseIntLiteral(Token token, i32& out) const

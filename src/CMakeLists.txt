@@ -131,6 +131,8 @@ target_sources(simlang PRIVATE
         sema/passes/constevalvisitor.h
         sema/passes/constfoldvisitor.cpp
         sema/passes/constfoldvisitor.h
+        sema/passes/captureanalysisvisitor.cpp
+        sema/passes/captureanalysisvisitor.h
         sema/passes/declcollectorvisitor.cpp
         sema/passes/declcollectorvisitor.h
         sema/passes/importvisitor.cpp

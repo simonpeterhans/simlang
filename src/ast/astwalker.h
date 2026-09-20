@@ -68,6 +68,19 @@ public:
         return true;
     }
 
+    bool visitLambda(LambdaNode* n)
+    {
+        for (ParamNode* param : n->mParams)
+        {
+            if (this->visit(param) == false)
+            {
+                return false;
+            }
+        }
+
+        return this->visit(n->mReturnTypeSpec) && this->visit(n->mBody);
+    }
+
     bool visitFunctionCall(FunctionCallNode* n)
     {
         if (this->visit(n->mReceiver) == false)

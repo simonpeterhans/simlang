@@ -35,6 +35,7 @@ X( RefLocal,          1,    LocalIdx,         mLocalIdx,     void,            _2
 X( RefGlobal,         1,    GlobalIdx,        mGlobalIdx,    void,            _2 )
 X( RefField,          1,    FieldOffset,      mFieldOffset,  void,            _2 )
 X( RefObjField,       1,    FieldOffset,      mFieldOffset,  void,            _2 )
+X( RefCapture,        1,    FieldOffset,      mFieldOffset,  void,            _2 )
 
 X( LoadLocal,         1,    LocalIdx,         mLocalIdx,     void,            _2 )
 X( StoreLocal,        1,    LocalIdx,         mLocalIdx,     void,            _2 )
@@ -46,6 +47,9 @@ X( LoadGlobal,        1,    GlobalIdx,        mGlobalIdx,    void,            _2
 X( StoreGlobal,       1,    GlobalIdx,        mGlobalIdx,    void,            _2 )
 X( LoadGlobalN,       2,    GlobalIdx,        mGlobalIdx,    OpWordCount,     mSize )
 X( StoreGlobalN,      2,    GlobalIdx,        mGlobalIdx,    OpWordCount,     mSize )
+
+X( LoadCapture,       1,    FieldOffset,      mFieldOffset,  void,            _2 )
+X( LoadCaptureN,      2,    FieldOffset,      mFieldOffset,  OpWordCount,     mSize )
 
 X( LoadRef,           0,    void,             _1,            void,            _2 )
 X( StoreRef,          0,    void,             _1,            void,            _2 )

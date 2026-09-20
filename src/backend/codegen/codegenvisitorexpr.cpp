@@ -7,6 +7,7 @@
 #include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/codegen/place.h"
+#include "backend/layout/layout.h"
 #include "backend/stringdata.h"
 #include "backend/typeidutils.h"
 #include "driver/compilercontext.h"
@@ -186,12 +187,26 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
         }
     }
 
+    // If it is a captured identifier, emit it from the lambda environment (from the heap).
+    if (const LambdaCapture* capture = findCurrentCapture(symbol))
+    {
+        emitEnvironmentValue(*capture, node->mResolvedType);
+        return true;
+    }
+
     // Otherwise, load the lvalue.
     return emitLoadFromLValue(node);
 }
 
 bool CodeGenVisitor::visitThis(ThisNode* node)
 {
+    // If we're using "this" from a capture, handle that.
+    if (const LambdaCapture* capture = findCurrentThisCapture())
+    {
+        emitEnvironmentValue(*capture, node->mResolvedType);
+        return true;
+    }
+
     // Note that this path is only taken if "this" is used as an rvalue.
     // If it's used as an lvalue, it should go through the storage address path.
     // Classes: "this" is always local 0, so we can just load that and be done.
@@ -207,6 +222,175 @@ bool CodeGenVisitor::visitThis(ThisNode* node)
 
     // Then push the entire thing onto the stack.
     return emitLoadFromPlace(Place::makeAddressOnStackPlace(node->mResolvedType));
+}
+
+const LambdaCapture* CodeGenVisitor::findCurrentCapture(Symbol* symbol) const
+{
+    if (mCurrentLambda == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Find the capture for a specific symbol.
+    for (const LambdaCapture& capture : mCurrentLambda->mCaptures)
+    {
+        if (capture.mKind == LambdaCaptureKind::cSymbol && capture.mSymbol == symbol)
+        {
+            return &capture;
+        }
+    }
+
+    return nullptr;
+}
+
+const LambdaCapture* CodeGenVisitor::findCurrentThisCapture() const
+{
+    if (mCurrentLambda == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Go through all the captures and find the one that is the "this".
+    for (const LambdaCapture& capture : mCurrentLambda->mCaptures)
+    {
+        if (capture.mKind == LambdaCaptureKind::cThis)
+        {
+            return &capture;
+        }
+    }
+
+    return nullptr;
+}
+
+Type* CodeGenVisitor::getLambdaCaptureType(const LambdaNode* lambda, const LambdaCapture& capture) const
+{
+    // If this is a symbol, return its type.
+    if (capture.mKind == LambdaCaptureKind::cSymbol)
+    {
+        return capture.mSymbol->mType;
+    }
+
+    // Otherwise this is "this", so get the type directly from the lambda node.
+    return lambda->mLexicalThisType;
+}
+
+void CodeGenVisitor::emitEnvironmentValue(const LambdaCapture& capture, Type* type)
+{
+    // Here, we load something from the lambda environment (from the heap).
+    // Get the size of the type we want to emit.
+    u32 words = layout::getWordSizeForType(type);
+    // Get the offset of the capture from the environment.
+    FieldOffset offset = static_cast<FieldOffset>(capture.mEnvironmentOffset);
+
+    // Emit the load.
+    if (words == 1)
+    {
+        emit<OpCode::cLoadCapture>(offset);
+    }
+    else
+    {
+        emit<OpCode::cLoadCaptureN>(offset, static_cast<OpWordCount>(words));
+    }
+}
+
+bool CodeGenVisitor::emitLambdaCaptureValue(const LambdaNode* lambda, const LambdaCapture& capture)
+{
+    // Push something onto the stack to initialize a field in an environment.
+    Type* captureType = getLambdaCaptureType(lambda, capture);
+
+    if (capture.mKind == LambdaCaptureKind::cThis)
+    {
+        // If it's a "this", check if we're nested.
+        if (const LambdaCapture* currentCapture = findCurrentThisCapture())
+        {
+            // If that is the case, use that.
+            emitEnvironmentValue(*currentCapture, captureType);
+            return true;
+        }
+
+        // Otherwise, it's the local at index 0.
+        emit<OpCode::cLoadLocal>(static_cast<LocalIdx>(0));
+
+        // For structs, we need to load the entire thing (at index 0) since it's a copy.
+        if (captureType->mKind == TypeKind::cStruct)
+        {
+            return emitLoadFromPlace(Place::makeAddressOnStackPlace(captureType));
+        }
+
+        return true;
+    }
+
+    // Otherwise, it's a symbol.
+    Symbol* symbol = capture.mSymbol;
+    // If it's already captured from an outer lambda, load it from there.
+    if (const LambdaCapture* currentCapture = findCurrentCapture(symbol))
+    {
+        emitEnvironmentValue(*currentCapture, captureType);
+        return true;
+    }
+
+    // Otherwise, this is a local.
+    LocalIdx localIndex = static_cast<LocalIdx>(symbol->mIndex);
+    if (symbol->mFlags.test(SymbolFlags::cInOut))
+    {
+        // An inout param is an address, so load that.
+        emit<OpCode::cLoadLocal>(localIndex);
+        return emitLoadFromPlace(Place::makeAddressOnStackPlace(captureType));
+    }
+
+    // Load it directly.
+    return emitLoadFromPlace(Place::makeLocalPlace(captureType, localIndex));
+}
+
+bool CodeGenVisitor::visitLambda(LambdaNode* node)
+{
+    // This emits the pair of lambda closure (environment) and function entry token.
+    // Get the function (lambda) index.
+    FunctionIdx functionIndex = static_cast<FunctionIdx>(node->mSymbol->mIndex);
+
+    if (node->mCaptures.empty())
+    {
+        // If we have 0 captures, we have a null environment and are already done.
+        emitIntegerImmediate(cNullRef);
+    }
+    else
+    {
+        // Otherwise, we need to create a new object in the form of the environment.
+        emit<OpCode::cNewObject>(static_cast<TypeID>(node->mEnvironmentTypeID));
+
+        // Then, we need to load all the captures.
+        for (const LambdaCapture& capture : node->mCaptures)
+        {
+            // Keep the environment ref we just created on the stack.
+            emit<OpCode::cDup>();
+
+            // Do the load of the value.
+            if (emitLambdaCaptureValue(node, capture) == false)
+            {
+                return false;
+            }
+
+            // Find out the size of it and the offset we have to store it at.
+            Type* captureType = getLambdaCaptureType(node, capture);
+            u32 words = layout::getWordSizeForType(captureType);
+            FieldOffset offset = static_cast<FieldOffset>(capture.mEnvironmentOffset);
+
+            // Do the store.
+            if (words == 1)
+            {
+                emit<OpCode::cStoreObjField>(offset);
+            }
+            else
+            {
+                emit<OpCode::cStoreObjFieldN>(offset, static_cast<OpWordCount>(words));
+            }
+        }
+    }
+
+    // Also push the function entry token.
+    emit<OpCode::cPush32>(makeFunctionEntryToken(functionIndex));
+
+    return true;
 }
 
 bool CodeGenVisitor::visitIntLiteral(IntLiteralNode* node)

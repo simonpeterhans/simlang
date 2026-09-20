@@ -38,6 +38,9 @@ struct Symbol
     ArrayView<Symbol*> mMembers;
     ConstValue mConstValue;
 
+    // The function or lambda whose frame owns this local/parameter.
+    Symbol* mOwningCallable = nullptr;
+
     // Symbol ID, assigned when registered to the table.
     i32 mID = -1;
     // Internal index, used differently depending on the symbol type.

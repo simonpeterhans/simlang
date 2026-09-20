@@ -21,6 +21,7 @@ public:
     bool visitBlockStatement(BlockStatementNode* node);
     bool visitForStatement(ForStatementNode* node);
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitLambda(LambdaNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
 

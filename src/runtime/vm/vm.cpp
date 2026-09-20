@@ -1108,7 +1108,7 @@ bool VM::run()
     // That can happen if e.g. syscalls push/pop from the stack.
     VMWord* stackBase = stack.getData();
     VMWord* sp = stackBase + stack.getSize();
-    // The function pointer is an index into the stack.
+    // The frame pointer is an index into the stack.
     u32 fp = 0;
 
     // Common idioms based on the above:
@@ -2094,6 +2094,30 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(RefCapture)
+    {
+        // Code:  RefCapture(fieldOffset: FieldOffset)
+        // Stack: [...] -> [fieldAddr, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+
+        // Look up the context address on the stack (under the function token).
+        VMWord context = stackBase[fp - cFunctionValueWordCount + cFunctionValueContextWord];
+
+        // If this isn't a heap address, something went wrong.
+        if (isHeapAddress(context) == false)
+        {
+            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
+            *sp++ = cInvalidAddress;
+            VM_END_OP_CHECKED();
+        }
+
+        // Get the context data and offset it by the field.
+        HeapIndex fieldIndex = getHeapPayload(context) + fieldOffset;
+        // Push the address at the field onto the stack.
+        *sp++ = makeHeapAddress(fieldIndex);
+
+        VM_END_OP();
+    }
     VM_OP(LoadLocal)
     {
         // Code:  LoadLocal(localIdx: LocalIdx)
@@ -2199,6 +2223,61 @@ bool VM::run()
 
         // Copy the value words into the globals.
         copyWords(&mGlobals[globalIdx], src, size);
+
+        VM_END_OP();
+    }
+    VM_OP(LoadCapture)
+    {
+        // Code:  LoadCapture(fieldOffset: FieldOffset)
+        // Stack: [...] -> [word, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+
+        // Look up the context address on the stack (under the function token).
+        VMWord context = stackBase[fp - cFunctionValueWordCount + cFunctionValueContextWord];
+
+        // If this isn't a heap address, something went wrong.
+        if (isHeapAddress(context) == false)
+        {
+            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
+            *sp++ = 0;
+            VM_END_OP_CHECKED();
+        }
+
+        // Get the context data and offset it by the field.
+        HeapIndex index = getHeapPayload(context) + fieldOffset;
+        // Directly push the value at the index onto the stack.
+        *sp++ = mHeap.wordAt(index);
+
+        VM_END_OP();
+    }
+    VM_OP(LoadCaptureN)
+    {
+        // Code:  LoadCaptureN(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [...] -> [wordN-1, ..., word0, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // Look up the context address on the stack (under the function token).
+        VMWord context = stackBase[fp - cFunctionValueWordCount + cFunctionValueContextWord];
+
+        // The destination is where the stack pointer currently is.
+        VMWord* dst = sp;
+        // Push N words.
+        sp += size;
+
+        // If this isn't a heap address, something went wrong.
+        if (isHeapAddress(context) == false)
+        {
+            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
+            // If the address is invalid, push zeros.
+            std::memset(dst, 0, size * sizeof(VMWord));
+            VM_END_OP_CHECKED();
+        }
+
+        // Get the context data and offset it by the field.
+        HeapIndex index = getHeapPayload(context) + fieldOffset;
+        // Copy stuff in.
+        copyWords(dst, &mHeap.wordAt(index), size);
 
         VM_END_OP();
     }
