@@ -216,10 +216,24 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             const FunctionInfo& function = mBackend.mFunctionInfos[index];
             return replaceStackWords(height, function.mArgWords, function.mReturnWords);
         }
+        case OpCode::cCallValue:
+        {
+            // Here, we also push the context and the value of the callable itself along with the args.
+            return replaceStackWords(height,
+                                     cFunctionValueWordCount + static_cast<u32>(op.as.mCallValue.mArgWords),
+                                     op.as.mCallValue.mReturnWords);
+        }
         case OpCode::cCallInterface:
         {
             const InterfaceCallInfo& info = mBackend.mInterfaceCallInfos[op.as.mCallInterface.mIndex];
             return replaceStackWords(height, static_cast<u32>(info.mArgWords) + 2U, info.mReturnWords);
+        }
+        case OpCode::cNewClosure:
+        {
+            // Here, we consume the captured variables and push the environment and entry token.
+            const FunctionInfo& function = mBackend.mFunctionInfos[op.as.mNewClosure.mIndex];
+            const TypeLayout& environment = mBackend.mTypeLayoutTable.getLayout(function.mEnvironmentTypeID);
+            return replaceStackWords(height, environment.getSizeOnHeap(), cFunctionValueWordCount);
         }
 
         case OpCode::cJumpZ:
@@ -251,8 +265,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cPushString:
         case OpCode::cRefLocal:
         case OpCode::cRefGlobal:
+        case OpCode::cRefCapture:
         case OpCode::cLoadLocal:
         case OpCode::cLoadGlobal:
+        case OpCode::cLoadCapture:
         case OpCode::cNewObject:
         case OpCode::cNewList:
         case OpCode::cNewMap:
@@ -278,6 +294,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cLoadGlobalN:
         {
             return pushStackWords(height, op.as.mLoadGlobalN.mSize);
+        }
+        case OpCode::cLoadCaptureN:
+        {
+            return pushStackWords(height, op.as.mLoadCaptureN.mSize);
         }
         case OpCode::cLoadRefN:
         {

@@ -68,6 +68,12 @@ bool ImportVisitor::visitImportDeclarationStatement(ImportDeclarationStatementNo
         return true;
     }
 
+    if (module == mCurrentModule)
+    {
+        mCtx.report<cModuleImportsItself>(node->mSourceRange);
+        return true;
+    }
+
     node->mResolvedModule = module;
 
     // Make sure the decls are collected since we might need them later here.

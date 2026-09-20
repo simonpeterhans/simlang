@@ -16,6 +16,7 @@ namespace simlang
 {
 
 struct ExecutableImage;
+struct LambdaNode;
 
 struct BackendState
 {
@@ -28,6 +29,7 @@ struct BackendState
     std::vector<u8> mBytes;
 
     std::vector<FunctionInfo> mFunctionInfos;
+    std::vector<LambdaNode*> mLambdas;
     std::vector<FunctionIdx> mInterfaceMethods;
     std::vector<InterfaceCallInfo> mInterfaceCallInfos;
     std::vector<SyscallEntry> mSyscallInfos;

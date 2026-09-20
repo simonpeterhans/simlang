@@ -19,21 +19,6 @@ static constexpr f32 cMaxHeapGrowthFactor = 4.0f;
 static constexpr f32 cMaxGCGrowthFactor = 16.0f;
 static constexpr u64 cMinMapBucketCapacity = 4;
 
-static bool isHeapHandleWord(VMWord w)
-{
-    return (w & cHeapKindMask) == cHeapHandleTag;
-}
-
-static bool isHeapAddressWord(VMWord w)
-{
-    return (w & cHeapKindMask) == cHeapAddressTag;
-}
-
-static HeapIndex heapPayloadFromWord(VMWord w)
-{
-    return (w & cHeapPayloadMask);
-}
-
 static u64 getListPayloadWords(u32 elementWords, u32 capacity)
 {
     return static_cast<u64>(elementWords) * capacity;
@@ -94,7 +79,7 @@ VMWord Heap::allocateObject(TypeID typeID, u32 dataWords, const RootProvider& ro
     }
 
     // Return the heap address to the payload (not the block header!).
-    return cHeapAddressTag | payloadIndexFromBase(base);
+    return makeHeapAddress(payloadIndexFromBase(base));
 }
 
 Heap::StringAlloc Heap::allocateString(u32 byteLen, const RootProvider& roots)
@@ -108,7 +93,7 @@ Heap::StringAlloc Heap::allocateString(u32 byteLen, const RootProvider& roots)
 
     // Here, we also return the heap address to the payload.
     StringAlloc ret;
-    ret.mRef = cHeapAddressTag | payloadIndexFromBase(base);
+    ret.mRef = makeHeapAddress(payloadIndexFromBase(base));
     ret.mBytes = StringBlock::getBytes(payloadFromBase(base));
     return ret;
 }
@@ -181,7 +166,7 @@ bool Heap::resizeList(VMWord handle, u32 capacity, const RootProvider& roots)
     }
 
     // Update the handle to point to the new base.
-    HeapIndex handleIndex = heapPayloadFromWord(handle);
+    HeapIndex handleIndex = getHeapPayload(handle);
     mHandles[handleIndex] = newBase;
 
     return true;
@@ -261,7 +246,7 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
     }
 
     // Update the handle to point to the new base.
-    HeapIndex handleIndex = heapPayloadFromWord(handle);
+    HeapIndex handleIndex = getHeapPayload(handle);
     mHandles[handleIndex] = newBase;
 
     return true;
@@ -272,13 +257,13 @@ bool Heap::resolvePayloadAddress(VMWord address, Block& out)
     out = Block{};
 
     // If this is not a heap address, bail.
-    if (isHeapAddressWord(address) == false)
+    if (isHeapAddress(address) == false)
     {
         return false;
     }
 
     // Get the heap index from the address.
-    HeapIndex payloadIndex = heapPayloadFromWord(address);
+    HeapIndex payloadIndex = getHeapPayload(address);
     if (payloadIndex < cBlockHeaderWords || payloadIndex >= mOwner.size())
     {
         return false;
@@ -423,13 +408,13 @@ bool Heap::resolveHandleToBase(VMWord handle, HeapIndex& outBase) const
     outBase = cInvalidHeapIndex;
 
     // If this is not a heap handle, bail.
-    if (isHeapHandleWord(handle) == false)
+    if (isHeapHandle(handle) == false)
     {
         return false;
     }
 
     // Get the payload from the word (which is the handle index).
-    HeapIndex handleIndex = heapPayloadFromWord(handle);
+    HeapIndex handleIndex = getHeapPayload(handle);
     if (handleIndex >= mHandles.size())
     {
         return false;
@@ -726,7 +711,7 @@ VMWord Heap::makeHandle(HeapIndex base)
         mHandles[handleIndex] = base;
     }
 
-    return cHeapHandleTag | handleIndex;
+    return makeHeapHandle(handleIndex);
 }
 
 void Heap::markFromRoots(const Roots& roots)
@@ -763,17 +748,17 @@ void Heap::markValue(VMWord maybeHeapAddr)
 {
     HeapIndex base = cInvalidHeapIndex;
 
-    if (isHeapHandleWord(maybeHeapAddr))
+    if (isHeapHandle(maybeHeapAddr))
     {
         if (resolveHandleToBase(maybeHeapAddr, base) == false)
         {
             return;
         }
     }
-    else if (isHeapAddressWord(maybeHeapAddr))
+    else if (isHeapAddress(maybeHeapAddr))
     {
         // Check if the address range could be valid.
-        HeapIndex idx = heapPayloadFromWord(maybeHeapAddr);
+        HeapIndex idx = getHeapPayload(maybeHeapAddr);
         if (idx >= mOwner.size())
         {
             return;

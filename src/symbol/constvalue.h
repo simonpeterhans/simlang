@@ -37,6 +37,7 @@ enum class ConstValueKind : u8
     cInvalid,
     cPrimitive,
     cStruct,
+    cFunction,
     cNull,
 };
 
@@ -96,6 +97,15 @@ struct ConstValue
         return value;
     }
 
+    static ConstValue makeFunction(Symbol* v)
+    {
+        ConstValue value;
+        value.as.mFunction = v;
+        value.mKind = ConstValueKind::cFunction;
+        value.mPrimitiveKind = PrimitiveTypeKind::cInvalid;
+        return value;
+    }
+
     // Null is relevant for global var init, so this takes part in const eval.
     static ConstValue makeNull()
     {
@@ -116,6 +126,7 @@ struct ConstValue
         bool mBool;
         const InternedString* mString;
         const ConstStructValue* mStruct;
+        Symbol* mFunction;
     } as{};
     ConstValueKind mKind = ConstValueKind::cInvalid;
     PrimitiveTypeKind mPrimitiveKind = PrimitiveTypeKind::cInvalid;

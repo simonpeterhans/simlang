@@ -53,6 +53,13 @@ static bool applyConstCast(ConstValue& value, Type* targetType)
                targetType->mKind == TypeKind::cMap || targetType->mKind == TypeKind::cInterface;
     }
 
+    // The only valid function cast is the same exact signature.
+    // That means we can just compare types.
+    if (value.mKind == ConstValueKind::cFunction)
+    {
+        return value.as.mFunction != nullptr && value.as.mFunction->mType == targetType;
+    }
+
     // Otherwise, the type has to be a primitive.
     if (targetType->mKind != TypeKind::cPrimitive)
     {
@@ -141,6 +148,13 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 {
     Symbol* s = node->mSymbol;
 
+    // If we have a function or a syscall, we can directly handle that (sine they're immutable anyway).
+    if (s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall)
+    {
+        mValue = ConstValue::makeFunction(s);
+        return true;
+    }
+
     // Only immutable variables (const) can be constexpr.
     if (s->mFlags.test(SymbolFlags::cMutable))
     {
@@ -154,7 +168,7 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
         return false;
     }
 
-    // IF we already evaluated this, don't go again.f
+    // If we already evaluated this, don't go again.
     switch (s->mConstEvalState)
     {
         case ConstEvalState::cReady:
@@ -196,6 +210,18 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 bool ConstEvalVisitor::visitThis(ThisNode*)
 {
     return false;
+}
+
+bool ConstEvalVisitor::visitLambda(LambdaNode* node)
+{
+    // Lambdas with captures are... not const evaluable.
+    if (node->mCaptures.empty() == false)
+    {
+        return false;
+    }
+
+    mValue = ConstValue::makeFunction(node->mSymbol);
+    return true;
 }
 
 bool ConstEvalVisitor::visitIntLiteral(IntLiteralNode* node)
@@ -402,6 +428,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
     if (node->mOp == BinaryOp::cEQ || node->mOp == BinaryOp::cNE)
     {
         if (l.mKind == ConstValueKind::cStruct || r.mKind == ConstValueKind::cStruct ||
+            l.mKind == ConstValueKind::cFunction || r.mKind == ConstValueKind::cFunction ||
             l.mKind == ConstValueKind::cNull || r.mKind == ConstValueKind::cNull)
         {
             bool equal = (l == r);

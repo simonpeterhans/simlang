@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/typeids.h"
 #include "runtime/vmdefines.h"
 
 namespace simlang
@@ -12,6 +13,7 @@ struct FunctionInfo
     FrameWordCount mArgWords = 0;
     FrameWordCount mLocalWords = 0;
     ReturnWordCount mReturnWords = 0;
+    TypeID mEnvironmentTypeID = cInvalidTypeID;
 };
 
 struct InterfaceCallInfo

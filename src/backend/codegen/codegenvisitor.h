@@ -23,6 +23,7 @@ struct InterfaceType;
 struct ListType;
 struct MapType;
 struct Place;
+struct Symbol;
 struct Type;
 enum class AssignmentOp : u8;
 enum class BinaryOp : u8;
@@ -33,6 +34,8 @@ class CodeGenVisitor : public ASTWalker<CodeGenVisitor>
 {
 public:
     explicit CodeGenVisitor(CompilerContext& ctx);
+
+    bool emitLambdaBodies();
 
     void enterNode(ASTNode* node);
     void leaveNode(ASTNode*);
@@ -49,6 +52,7 @@ public:
     bool visitNullLiteral(NullLiteralNode* node);
     bool visitFormatString(FormatStringNode* node);
     bool visitNewObject(NewObjectNode* node);
+    bool visitLambda(LambdaNode* node);
     bool visitFunctionCall(FunctionCallNode* node);
     bool visitIndexCall(IndexCallNode* node);
     bool visitMemberAccess(MemberAccessNode* node);
@@ -113,6 +117,12 @@ private:
     bool emitTemporaryAddress(ExpressionNode* expr);
     bool emitAddress(ExpressionNode* expr, AddressMode mode);
 
+    const LambdaCapture* findCurrentCapture(Symbol* symbol) const;
+    const LambdaCapture* findCurrentThisCapture() const;
+    Type* getLambdaCaptureType(const LambdaNode* lambda, const LambdaCapture& capture) const;
+    void emitEnvironmentValue(const LambdaCapture& capture, Type* type);
+    bool emitLambdaCaptureValue(const LambdaNode* lambda, const LambdaCapture& capture);
+
     bool canFuseLValueAccess(ExpressionNode* expr);
     bool tryEmitFusedLoadFromLValue(ExpressionNode* expr);
     bool tryEmitFusedStoreIntoLValue(ExpressionNode* lhs, ExpressionNode* rhs);
@@ -130,8 +140,9 @@ private:
     bool emitInterfaceObjectRef(ExpressionNode* expr);
     bool emitInterfaceEqualityComparison(BinaryOp op, ExpressionNode* lhs, ExpressionNode* rhs);
     bool emitEqualityComparison(BinaryOp op, Type* type, const Place& lhs, const Place& rhs);
+    bool emitEqualityOperands(BinaryOpNode* node);
+    bool emitFunctionEqualityComparison(BinaryOp op, const Place& lhs, const Place& rhs);
     bool emitStructEqualityComparison(BinaryOp op, AggregateType* structType, const Place& lhs, const Place& rhs);
-    bool emitStructEqualityOperands(BinaryOpNode* node);
     bool emitArithmeticOrBitwiseOpcode(BinaryOp op, PrimitiveTypeKind resultKind);
     bool emitInterfaceConversion(Type* fromType, InterfaceType* toType);
     bool emitPrimitiveConversion(PrimitiveTypeKind fromKind, PrimitiveTypeKind toKind);
@@ -155,6 +166,7 @@ private:
     bool emitMapMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitFreeFunctionOrSyscallCall(FunctionCallNode* node);
+    bool emitIndirectFunctionCall(FunctionCallNode* node);
 
     // Object construction.
     bool emitNewList(NewObjectNode* node, ListType* listType);
@@ -174,6 +186,7 @@ private:
 
     FunctionInfo* mCurrentFunctionInfo = nullptr;
     AggregateType* mCurrentAggregateType = nullptr;
+    LambdaNode* mCurrentLambda = nullptr;
 };
 
 } // namespace simlang

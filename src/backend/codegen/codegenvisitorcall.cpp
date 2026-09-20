@@ -171,13 +171,7 @@ bool CodeGenVisitor::emitInterfaceMethodDispatch(MemberAccessNode* memberAccess,
         return false;
     }
 
-    // Also check the return words.
     u32 returnWords = layout::getWordSizeForType(funcType->mReturnType);
-    if (returnWords > cMaxReturnWords)
-    {
-        mCtx.report<cFunctionFrameTooLarge>(memberAccess->mSourceRange, returnWords, "return", cMaxReturnWords);
-        return false;
-    }
 
     // The interface method slot we can simply take from the member access node.
     auto slot = static_cast<InterfaceMethodSlot>(memberAccess->mSymbol->mIndex);
@@ -521,6 +515,48 @@ bool CodeGenVisitor::emitFreeFunctionOrSyscallCall(FunctionCallNode* node)
 
     SyscallIdx syscallIndex = static_cast<SyscallIdx>(symbol->mIndex);
     emit<OpCode::cSyscall>(syscallIndex);
+
+    return true;
+}
+
+bool CodeGenVisitor::emitIndirectFunctionCall(FunctionCallNode* node)
+{
+    // Get the function and resolve the receiver.
+    auto* funcType = static_cast<FunctionType*>(node->mReceiver->mResolvedType);
+
+    // Resolve the receiver of the call (stuff before the '(').
+    // This will push the callable data.
+    if (visit(node->mReceiver) == false)
+    {
+        return false;
+    }
+
+    // Emit the args.
+    if (emitCallArguments(node->mArgs, funcType) == false)
+    {
+        return false;
+    }
+
+    // We have the callable already on the stack and pushed the args on top.
+    // For now, we give the call instruction information on the arg and return words.
+    // The arg words are needed for the VM to know where to find the callable in the first place.
+    // (Otherwise, we'd have to push the callable after the params, which we currently don't do.)
+    // The return word count is needed in case we call a null pointer and need to keep the stack healthy.
+    // Would it make sense to change this if we ever enforce null-safety through '?'?
+    // (We currently also use this for stack analysis at compile time since we don't know the callable value then.)
+    u64 argWords = 0;
+    for (const FunctionParam& param : funcType->mParamTypes)
+    {
+        argWords += param.mIsInOut ? 1U : layout::getWordSizeForType(param.mType);
+    }
+    if (argWords > cMaxOpWordCount)
+    {
+        mCtx.report<cFunctionFrameTooLarge>(node->mSourceRange, argWords, "argument", cMaxOpWordCount);
+        return false;
+    }
+
+    u32 returnWords = layout::getWordSizeForType(funcType->mReturnType);
+    emit<OpCode::cCallValue>(static_cast<OpWordCount>(argWords), static_cast<ReturnWordCount>(returnWords));
 
     return true;
 }

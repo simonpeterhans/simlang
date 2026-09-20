@@ -83,7 +83,8 @@ bool AggregateLayoutVisitor::isPrimitiveType(Type* type)
         }
         case TypeKind::cFunction:
         {
-            return true;
+            // Functions include lambdas, whose captures are heap-allocated..
+            return false;
         }
         default:
         {

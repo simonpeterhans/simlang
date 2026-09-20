@@ -37,6 +37,28 @@ struct NamedTypeSpecifierNode : TypeSpecifierNode
     ArrayView<TypeSpecifierNode*> mTypeArgs;
 };
 
+struct FunctionTypeParameterSpecifier
+{
+    SourceRange mSourceRange;
+    TypeSpecifierNode* mTypeSpecifier = nullptr;
+    bool mIsInOut = false;
+};
+
+struct FunctionTypeSpecifierNode : TypeSpecifierNode
+{
+    explicit FunctionTypeSpecifierNode(SourceRange range,
+                                       ArrayView<FunctionTypeParameterSpecifier> params,
+                                       TypeSpecifierNode* returnTypeSpecifier)
+        : TypeSpecifierNode(NodeType::cFunctionTypeSpecifier, range)
+        , mParams(params)
+        , mReturnTypeSpecifier(returnTypeSpecifier)
+    {
+    }
+
+    ArrayView<FunctionTypeParameterSpecifier> mParams;
+    TypeSpecifierNode* mReturnTypeSpecifier;
+};
+
 struct SubstitutedTypeSpecifierNode : TypeSpecifierNode
 {
     explicit SubstitutedTypeSpecifierNode(SourceRange range, Type* type)

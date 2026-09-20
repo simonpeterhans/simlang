@@ -1,3 +1,4 @@
+#include <array>
 #include <vector>
 
 #include "ast/nodes/exprnodes.h"
@@ -56,7 +57,74 @@ bool Parser::parseTypeArgumentList(std::vector<TypeSpecifierNode*>& typeArgs)
     }
 }
 
-TypeSpecifierNode* Parser::parseTypeSpec()
+TypeSpecifierNode* Parser::parseFunctionTypeSpec()
+{
+    // Consume the "fun".
+    Token funToken = consume();
+
+    // Consume the '('.
+    if (expect(TokenType::cLeftParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Pars the params until we have a ')'.
+    std::vector<FunctionTypeParameterSpecifier> params;
+    while (check(TokenType::cRightParen) == false)
+    {
+        if (params.empty() == false)
+        {
+            // Consume the ',' before every param except the first.
+            if (tryConsume(TokenType::cComma) == false)
+            {
+                mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
+                                              std::array{TokenType::cComma, TokenType::cRightParen},
+                                              getCurrentTokenText());
+                return nullptr;
+            }
+        }
+
+        SourceLocation paramStart = getCurrentTokenRange().getStartLoc();
+
+        // Consume the "inout" if we have one.
+        bool isInOut = tryConsume(TokenType::cInOut);
+
+        // Parse the type specifier.
+        TypeSpecifierNode* typeSpecifier = parseTypeSpec();
+        if (typeSpecifier == nullptr)
+        {
+            return nullptr;
+        }
+
+        // Define the range and add the param.
+        SourceRange paramRange{paramStart, typeSpecifier->mSourceRange.getEndLoc()};
+        params.push_back(FunctionTypeParameterSpecifier{paramRange, typeSpecifier, isInOut});
+    }
+
+    // Consume the ')'.
+    if (expect(TokenType::cRightParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Consume the ':'.
+    if (expect(TokenType::cColon, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Parse the return type.
+    TypeSpecifierNode* returnTypeSpecifier = parseTypeSpec();
+    if (returnTypeSpecifier == nullptr)
+    {
+        return nullptr;
+    }
+
+    SourceRange range{funToken.getRange().getStartLoc(), returnTypeSpecifier->mSourceRange.getEndLoc()};
+    return mCtx.create<FunctionTypeSpecifierNode>(range, makeArrayView(mCtx.mAllocator, params), returnTypeSpecifier);
+}
+
+TypeSpecifierNode* Parser::parseNamedTypeSpec()
 {
     // Expect an identifier for the type name.
     Token lhsToken = cErrorToken;
@@ -95,6 +163,16 @@ TypeSpecifierNode* Parser::parseTypeSpec()
 
     ArrayView<TypeSpecifierNode*> typeArgsView = makeArrayView(mCtx.mAllocator, typeArgs);
     return mCtx.create<NamedTypeSpecifierNode>(namedRange, fullNode, typeArgsView);
+}
+
+TypeSpecifierNode* Parser::parseTypeSpec()
+{
+    if (check(TokenType::cFun))
+    {
+        return parseFunctionTypeSpec();
+    }
+
+    return parseNamedTypeSpec();
 }
 
 } // namespace simlang

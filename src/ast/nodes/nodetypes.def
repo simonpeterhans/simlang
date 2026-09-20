@@ -10,6 +10,7 @@ X( StringLiteral )
 X( NullLiteral )
 X( FormatString )
 X( NewObject )
+X( Lambda )
 X( FunctionCall )
 X( IndexCall )
 X( MemberAccess )
@@ -43,6 +44,7 @@ X( ParamDeclaration )
 
 // Type specifiers.
 X( NamedTypeSpecifier )
+X( FunctionTypeSpecifier )
 X( SubstitutedTypeSpecifier )
 
 // Misc.

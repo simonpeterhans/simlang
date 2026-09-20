@@ -63,6 +63,11 @@ bool ConstFoldVisitor::visitNewObject(NewObjectNode* node)
     return true;
 }
 
+bool ConstFoldVisitor::visitLambda(LambdaNode* node)
+{
+    return visit(node->mBody);
+}
+
 bool ConstFoldVisitor::visitFunctionCall(FunctionCallNode* node)
 {
     foldExpr(node->mReceiver);

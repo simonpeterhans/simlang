@@ -124,6 +124,20 @@ public:
                                         n->mConstructionKind);
     }
 
+    ExpressionNode* cloneLambda(LambdaNode* n)
+    {
+        std::vector<ParamNode*> params;
+        params.reserve(n->mParams.size());
+        for (ParamNode* param : n->mParams)
+        {
+            params.push_back(cloneParam(param));
+        }
+
+        TypeSpecifierNode* returnTypeSpec = cloneTypeSpecifier(n->mReturnTypeSpec);
+        StatementNode* body = cloneStatement(n->mBody);
+        return cloneNode<LambdaNode>(n, makeArrayView(mAllocator, params), returnTypeSpec, body);
+    }
+
     ExpressionNode* cloneFunctionCall(FunctionCallNode* n)
     {
         std::vector<CallArgument> args;
@@ -389,6 +403,20 @@ public:
 
         ExpressionNode* nameExpression = cloneExpression(n->mNameExpression);
         return cloneNode<NamedTypeSpecifierNode>(n, nameExpression, makeArrayView(mAllocator, args));
+    }
+
+    TypeSpecifierNode* cloneFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
+    {
+        std::vector<FunctionTypeParameterSpecifier> params;
+        params.reserve(n->mParams.size());
+        for (const FunctionTypeParameterSpecifier& param : n->mParams)
+        {
+            TypeSpecifierNode* typeSpecifier = cloneTypeSpecifier(param.mTypeSpecifier);
+            params.push_back(FunctionTypeParameterSpecifier{param.mSourceRange, typeSpecifier, param.mIsInOut});
+        }
+
+        TypeSpecifierNode* returnTypeSpecifier = cloneTypeSpecifier(n->mReturnTypeSpecifier);
+        return cloneNode<FunctionTypeSpecifierNode>(n, makeArrayView(mAllocator, params), returnTypeSpecifier);
     }
 
     TypeSpecifierNode* cloneSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* n)

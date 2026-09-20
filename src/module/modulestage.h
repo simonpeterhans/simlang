@@ -13,6 +13,7 @@ enum class ModuleStage : u8
     cImportsBound,
     cNamesResolved,
     cThisRewritten,
+    cCapturesAnalyzed,
     cTypesChecked,
     cConstsFolded
 };

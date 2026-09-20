@@ -29,7 +29,8 @@ enum class RuntimeErrorKind : u8
     cShiftOutOfRange,
     cInvalidStringHandle,
     cSyscallFailed,
-    cEmptyList
+    cEmptyList,
+    cInvalidFunctionValue
 };
 
 struct RuntimeError
@@ -59,6 +60,7 @@ constexpr const char* runtimeErrorKindToString(RuntimeErrorKind kind)
         case RuntimeErrorKind::cInvalidStringHandle: return "invalid string handle";
         case RuntimeErrorKind::cSyscallFailed: return "syscall failed";
         case RuntimeErrorKind::cEmptyList: return "empty list";
+        case RuntimeErrorKind::cInvalidFunctionValue: return "invalid function value";
         default: return "unknown runtime error";
     }
 }

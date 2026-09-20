@@ -4,11 +4,13 @@
 #include "ast/nodes/nodetypes.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/codegen/place.h"
+#include "driver/compilercontext.h"
 #include "runtime/op/opcode.h"
 #include "runtime/vmdefines.h"
 #include "symbol/symbol.h"
 #include "type/typekind.h"
 #include "type/types.h"
+#include "type/typetable.h"
 #include "util/arrayview.h"
 #include "util/types.h"
 
@@ -332,6 +334,10 @@ bool CodeGenVisitor::emitEqualityComparison(BinaryOp op, Type* type, const Place
 
             return emitReferenceEqualityOpCode(op);
         }
+        case TypeKind::cFunction:
+        {
+            return emitFunctionEqualityComparison(op, lhs, rhs);
+        }
         case TypeKind::cStruct:
         {
             return emitStructEqualityComparison(op, static_cast<AggregateType*>(type), lhs, rhs);
@@ -341,6 +347,39 @@ bool CodeGenVisitor::emitEqualityComparison(BinaryOp op, Type* type, const Place
             return false;
         }
     }
+}
+
+bool CodeGenVisitor::emitFunctionEqualityComparison(BinaryOp op, const Place& lhs, const Place& rhs)
+{
+    // Function identity includes both the closure context and the entry token.
+    u32 notEqualLabel = makeLabel();
+    u32 endLabel = makeLabel();
+    Type* wordType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
+
+    // Load the words for both values and do a comparison.
+    // We currently compare word by word.
+    // (cFunctionValueWordCount is just 2 at the moment, so this is not a huge performance loss.)
+    for (u32 offset = 0; offset < cFunctionValueWordCount; ++offset)
+    {
+        Place lhsWord = lhs.derive(wordType, offset);
+        Place rhsWord = rhs.derive(wordType, offset);
+        if (emitLoadFromPlace(lhsWord) == false || emitLoadFromPlace(rhsWord) == false)
+        {
+            return false;
+        }
+
+        emit<OpCode::cIEQ>();
+        emit<OpCode::cJumpZ>(notEqualLabel);
+    }
+
+    // Push 1 or 0 based on the result.
+    emit<OpCode::cPush8>(static_cast<u8>(op == BinaryOp::cEQ ? 1 : 0));
+    emit<OpCode::cJump>(endLabel);
+    emit<OpCode::cLabel>(notEqualLabel);
+    emit<OpCode::cPush8>(static_cast<u8>(op == BinaryOp::cEQ ? 0 : 1));
+    emit<OpCode::cLabel>(endLabel);
+
+    return true;
 }
 
 bool CodeGenVisitor::emitStructEqualityComparison(BinaryOp op,
@@ -382,25 +421,26 @@ bool CodeGenVisitor::emitStructEqualityComparison(BinaryOp op,
     return true;
 }
 
-bool CodeGenVisitor::emitStructEqualityOperands(BinaryOpNode* node)
+bool CodeGenVisitor::emitEqualityOperands(BinaryOpNode* node)
 {
-    auto* structType = static_cast<AggregateType*>(node->mLeft->mResolvedType);
+    Type* type = node->mLeft->mResolvedType;
 
     Place lhs;
     Place rhs;
     bool lhsDirect = tryGetDirectPlace(node->mLeft, lhs);
     bool rhsDirect = tryGetDirectPlace(node->mRight, rhs);
 
+    // Function and struct comparison use the same operand handling here.
     // If both operands are direct, we can compare them directly.
     if (lhsDirect && rhsDirect)
     {
-        return emitStructEqualityComparison(node->mOp, structType, lhs, rhs);
+        return emitEqualityComparison(node->mOp, type, lhs, rhs);
     }
 
     // Otherwise, we create a temporary place to hold the value of the left operand.
     // That is a copy in case we do something like a == mutateA().
     Place lhsTemp;
-    if (allocateTemporaryPlace(structType, lhsTemp) == false)
+    if (allocateTemporaryPlace(type, lhsTemp) == false)
     {
         return false;
     }
@@ -425,14 +465,14 @@ bool CodeGenVisitor::emitStructEqualityOperands(BinaryOpNode* node)
     if (rhsDirect == false)
     {
         // If the rhs is not direct, evaluate it into the temp.
-        if (allocateTemporaryPlace(structType, rhs) == false || emitInto(node->mRight, rhs) == false)
+        if (allocateTemporaryPlace(type, rhs) == false || emitInto(node->mRight, rhs) == false)
         {
             return false;
         }
     }
 
     // Emit comparison stuff for the temps.
-    return emitStructEqualityComparison(node->mOp, structType, lhs, rhs);
+    return emitEqualityComparison(node->mOp, type, lhs, rhs);
 }
 
 bool CodeGenVisitor::emitArithmeticOrBitwiseOpcode(BinaryOp op, PrimitiveTypeKind resultKind)

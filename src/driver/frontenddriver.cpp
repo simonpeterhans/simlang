@@ -19,6 +19,7 @@
 #include "parser/parser.h"
 #include "parser/parsercontext.h"
 #include "parser/tokenizer.h"
+#include "sema/passes/captureanalysisvisitor.h"
 #include "sema/passes/constfoldvisitor.h"
 #include "sema/passes/declcollectorvisitor.h"
 #include "sema/passes/implicitthisvisitor.h"
@@ -80,6 +81,11 @@ bool FrontendDriver::run()
     }
 
     if (processAllToStage(ModuleStage::cThisRewritten) == false)
+    {
+        return false;
+    }
+
+    if (processAllToStage(ModuleStage::cCapturesAnalyzed) == false)
     {
         return false;
     }
@@ -310,6 +316,23 @@ bool FrontendDriver::doTypeCheck(ModuleEntry* module)
     return phase.finish(true);
 }
 
+bool FrontendDriver::doCaptureAnalysis(ModuleEntry* module)
+{
+    static constexpr const char* cPhaseName = "Analyzing captures";
+
+    auto phase = mCtx.mLog.getPhaseLogger(cPhaseName);
+
+    CaptureAnalysisVisitor visitor{mCtx};
+    if (visitor.run(module->mAST) == false)
+    {
+        return phase.finish(false);
+    }
+
+    module->mStage = ModuleStage::cCapturesAnalyzed;
+
+    return phase.finish(true);
+}
+
 bool FrontendDriver::doConstFolding(ModuleEntry* module)
 {
     static constexpr const char* cPhaseName = "Folding constants";
@@ -398,6 +421,14 @@ bool FrontendDriver::processToStage(ModuleEntry* module, ModuleStage target)
                 break;
             }
             case ModuleStage::cThisRewritten:
+            {
+                if (doCaptureAnalysis(module) == false)
+                {
+                    return false;
+                }
+                break;
+            }
+            case ModuleStage::cCapturesAnalyzed:
             {
                 if (doTypeCheck(module) == false)
                 {

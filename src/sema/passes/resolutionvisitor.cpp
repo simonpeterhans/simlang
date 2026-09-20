@@ -60,12 +60,32 @@ bool ResolutionVisitor::run(TranslationUnitNode* node)
     return traversalOk && mCtx.mDiag.hasNoErrorsSince(checkpoint);
 }
 
+bool ResolutionVisitor::isInitializing(Symbol* symbol) const
+{
+    for (Symbol* initializing : mInitializingSymbols)
+    {
+        if (initializing == symbol)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool ResolutionVisitor::visitIdentifier(IdentifierNode* node)
 {
     // Look it up in the current scopes.
     if (Symbol* symbol = mCtx.mScopes.getSymbolRecursive(node->mIdentifier))
     {
         node->mSymbol = symbol;
+
+        // If we're currently initializing this symbol, bail.
+        if (isInitializing(symbol))
+        {
+            mCtx.report<cVariableUsedInOwnInitializer>(node->mSourceRange, symbol->mIdentifier);
+            return true;
+        }
 
         if (mCurrentFieldDefault != nullptr)
         {
@@ -90,12 +110,38 @@ bool ResolutionVisitor::visitIdentifier(IdentifierNode* node)
 bool ResolutionVisitor::visitThis(ThisNode* node)
 {
     // If we're not inside a method, this is an error.
-    if (mCurrentSymbol == nullptr || mCurrentSymbol->mSymbolType != SymbolType::cMemberFunction)
+    if (mCurrentThisOwner == nullptr)
     {
         mCtx.report<cThisOutsideMethod>(node->mSourceRange);
     }
 
     return true;
+}
+
+bool ResolutionVisitor::visitLambda(LambdaNode* node)
+{
+    // For a lambda, immediately declare a new scope.
+    ScopeGuard scopeGuard{mCtx.mScopes, node->mScope};
+    // Also, set the symbol.
+    SymbolScope symbolScope{mCurrentSymbol, node->mSymbol};
+
+    // Resolve the return type.
+    if (visit(node->mReturnTypeSpec) == false)
+    {
+        return false;
+    }
+
+    // Resolve the params.
+    for (ParamNode* param : node->mParams)
+    {
+        if (visit(param) == false)
+        {
+            return false;
+        }
+    }
+
+    // Resolve the body.
+    return visit(node->mBody);
 }
 
 bool ResolutionVisitor::visitModuleAccess(ModuleAccessNode* node)
@@ -234,6 +280,7 @@ bool ResolutionVisitor::visitVariableDeclarationStatement(VariableDeclarationSta
         Symbol* s = mCtx.mSymbols.createSymbol(SymbolType::cStackVariable);
         s->mIdentifier = node->mIdentifier;
         s->mDeclNode = node;
+        s->mOwningCallable = mCurrentSymbol;
 
         // Set the variable in the symbol.
         node->mSymbol = s;
@@ -268,7 +315,14 @@ bool ResolutionVisitor::visitVariableDeclarationStatement(VariableDeclarationSta
         Symbol* fieldDefault = (node->mSymbol->mSymbolType == SymbolType::cMemberVariable) ? node->mSymbol : nullptr;
         ScopedValueBinder fieldDefaultScope{mCurrentFieldDefault, fieldDefault};
 
-        if (visit(node->mInit) == false)
+        // Mark the variable as initializing since we disallow self-reference during init.
+        mInitializingSymbols.push_back(node->mSymbol);
+
+        bool success = visit(node->mInit);
+
+        mInitializingSymbols.pop_back();
+
+        if (success == false)
         {
             return false;
         }
@@ -283,6 +337,8 @@ bool ResolutionVisitor::visitFunctionDeclarationStatement(FunctionDeclarationSta
     // The actual function type is only created during type checking.
     ScopeGuard sg{mCtx.mScopes, node->mScope};
     SymbolScope cs{mCurrentSymbol, node->mSymbol};
+    Symbol* thisOwner = (node->mSymbol->mSymbolType == SymbolType::cMemberFunction) ? node->mSymbol : nullptr;
+    ScopedValueBinder thisOwnerScope{mCurrentThisOwner, thisOwner};
 
     // For non-initializers, resolve the return type.
     if (node->mIsInitMethod == false)
@@ -357,6 +413,8 @@ bool ResolutionVisitor::visitParamDeclaration(ParamDeclarationNode* node)
     // Otherwise, we're good to go and can create a new symbol.
     Symbol* symbol = mCtx.mSymbols.createSymbol(SymbolType::cParameter);
     symbol->mIdentifier = node->mIdentifier;
+    symbol->mDeclNode = node;
+    symbol->mOwningCallable = mCurrentSymbol;
     // For now, params are mutable.
     symbol->mFlags.set(SymbolFlags::cMutable, true);
     symbol->mFlags.set(SymbolFlags::cInOut, node->mIsInOut);
@@ -545,6 +603,51 @@ bool ResolutionVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
         // Get the symbol and type from the instanced template and use that.
         node->mType = generated->mSymbol->mType;
     }
+
+    return true;
+}
+
+bool ResolutionVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node)
+{
+    //  If this is already resolved, bail.
+    if (node->mType != nullptr)
+    {
+        return true;
+    }
+
+    std::vector<FunctionParam> params;
+    params.reserve(node->mParams.size());
+
+    // Otherwise, resolve the param types.
+    for (FunctionTypeParameterSpecifier& param : node->mParams)
+    {
+        if (visit(param.mTypeSpecifier) == false)
+        {
+            return false;
+        }
+
+        // Check if something went wrong.
+        if (param.mTypeSpecifier->mType == nullptr)
+        {
+            return true;
+        }
+
+        params.push_back(FunctionParam{param.mTypeSpecifier->mType, param.mIsInOut});
+    }
+
+    // Resolve the return type spec.
+    if (visit(node->mReturnTypeSpecifier) == false)
+    {
+        return false;
+    }
+
+    // Also check for success before adding the function type.
+    if (node->mReturnTypeSpecifier->mType == nullptr)
+    {
+        return true;
+    }
+
+    node->mType = mCtx.mTypes.getOrAddFunction(node->mReturnTypeSpecifier->mType, params);
 
     return true;
 }

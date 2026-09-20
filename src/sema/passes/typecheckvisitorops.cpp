@@ -311,6 +311,13 @@ bool TypeCheckVisitor::requireAssignableLValue(ExpressionNode* expr, bool allowI
         return true;
     }
 
+    // "this" is a receiver, not a rebindable variable.
+    if (expr->mNodeType == NodeType::cThis)
+    {
+        mCtx.report<cCannotRebindThis>(expr->mSourceRange);
+        return false;
+    }
+
     // Check the lvalue flag.
     if (expr->mFlags.test(cExprIsLValue) == false)
     {
@@ -516,7 +523,7 @@ void TypeCheckVisitor::resolveBinaryEqualityOps(BinaryOpNode* node)
     {
         bool isComparableNonPrimitive = lhsKind == TypeKind::cClass || lhsKind == TypeKind::cList ||
                                         lhsKind == TypeKind::cMap || lhsKind == TypeKind::cStruct ||
-                                        lhsKind == TypeKind::cInterface;
+                                        lhsKind == TypeKind::cInterface || lhsKind == TypeKind::cFunction;
         if (lhs->mResolvedType != rhs->mResolvedType || isEqualityOp == false || isComparableNonPrimitive == false)
         {
             diagnoseInvalidBinaryOperands(node);

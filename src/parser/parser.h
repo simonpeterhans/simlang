@@ -136,6 +136,7 @@ private:
     ExpressionNode* parseParen();
     ExpressionNode* parseMake();
     ExpressionNode* parseNew();
+    ExpressionNode* parseLambda();
     bool parseArgumentList(std::vector<CallArgument>& args);
     ExpressionNode* parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec);
     ExpressionNode* parseObjectConstruction(Token constructionToken,
@@ -186,6 +187,8 @@ private:
 
     bool parseTypeArgumentList(std::vector<TypeSpecifierNode*>& typeArgs);
 
+    TypeSpecifierNode* parseFunctionTypeSpec();
+    TypeSpecifierNode* parseNamedTypeSpec();
     TypeSpecifierNode* parseTypeSpec();
 
     ParserContext& mCtx;

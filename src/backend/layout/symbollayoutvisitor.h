@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/astwalker.h"
+#include "runtime/vmdefines.h"
 #include "util/types.h"
 
 namespace simlang
@@ -18,6 +19,7 @@ public:
 
     // Statements.
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitLambda(LambdaNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
 
@@ -25,9 +27,11 @@ public:
     bool visitParamDeclaration(ParamDeclarationNode* node);
 
 private:
+    FunctionInfo& getCurrentFunction();
+
     CompilerContext& mCtx;
 
-    FunctionInfo* mCurrentFunction = nullptr;
+    FunctionIdx mCurrentFunction = cInvalidFunctionIdx;
     u32 mNextGlobalWordIndex = 0;
     u32 mNextMemberFieldIndex = 0;
 };

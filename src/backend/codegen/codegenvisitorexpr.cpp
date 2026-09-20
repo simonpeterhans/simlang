@@ -7,6 +7,7 @@
 #include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/codegen/place.h"
+#include "backend/layout/layout.h"
 #include "backend/stringdata.h"
 #include "backend/typeidutils.h"
 #include "driver/compilercontext.h"
@@ -114,32 +115,53 @@ bool CodeGenVisitor::visitCast(CastNode* node)
 
 bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
 {
-    // If this is a constexpr, we can try to emit the value directly.
-    if (node->mSymbol->mFlags.test(SymbolFlags::cConstExpr))
-    {
-        Symbol* s = node->mSymbol;
+    Symbol* symbol = node->mSymbol;
 
+    // If this is a function or a syscall and we visit it, emit it as callable value.
+    if (symbol->mSymbolType == SymbolType::cFunction || symbol->mSymbolType == SymbolType::cSyscall)
+    {
+        emitIntegerImmediate(cNullRef);
+
+        VMWord entryToken = cInvalidFunctionEntryToken;
+        if (symbol->mSymbolType == SymbolType::cFunction)
+        {
+            entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(symbol->mIndex));
+        }
+        else
+        {
+            entryToken =
+                makeSyscallEntryToken(mCtx.mBackend.mFunctionInfos.size(), static_cast<SyscallIdx>(symbol->mIndex));
+        }
+
+        emit<OpCode::cPush32>(entryToken);
+
+        return true;
+    }
+
+    // If this is a constexpr, we can try to emit the value directly.
+    if (symbol->mFlags.test(SymbolFlags::cConstExpr))
+    {
         if (node->mResolvedType->mKind == TypeKind::cPrimitive)
         {
-            switch (s->mConstValue.mPrimitiveKind)
+            switch (symbol->mConstValue.mPrimitiveKind)
             {
                 case PrimitiveTypeKind::cInt:
                 {
                     // Don't emit more than we have to (i8/i16 if possible).
-                    emitIntegerImmediate(s->mConstValue.as.mInteger);
+                    emitIntegerImmediate(symbol->mConstValue.as.mInteger);
                     return true;
                 }
                 case PrimitiveTypeKind::cFloat:
                 {
                     // Push the float as u32.
-                    u32 val = bits::bitCast<u32>(s->mConstValue.as.mFloat);
+                    u32 val = bits::bitCast<u32>(symbol->mConstValue.as.mFloat);
                     emit<OpCode::cPush32>(val);
                     return true;
                 }
                 case PrimitiveTypeKind::cBool:
                 {
                     // Bools are 0 or 1.
-                    u8 val = (s->mConstValue.as.mBool) ? 1U : 0U;
+                    u8 val = (symbol->mConstValue.as.mBool) ? 1U : 0U;
                     emit<OpCode::cPush8>(val);
                     return true;
                 }
@@ -147,7 +169,7 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
                 {
                     // Register the string literal and use that index.
                     StringLiteralIdx stringIndex;
-                    if (mCtx.mBackend.mStrings.getLiteralIndex(s->mConstValue.as.mString, stringIndex) == false)
+                    if (mCtx.mBackend.mStrings.getLiteralIndex(symbol->mConstValue.as.mString, stringIndex) == false)
                     {
                         SIMLANG_BREAK("Constexpr string missing from string layout.");
                         return false;
@@ -165,12 +187,26 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
         }
     }
 
+    // If it is a captured identifier, emit it from the lambda environment (from the heap).
+    if (const LambdaCapture* capture = findCurrentCapture(symbol))
+    {
+        emitEnvironmentValue(*capture, node->mResolvedType);
+        return true;
+    }
+
     // Otherwise, load the lvalue.
     return emitLoadFromLValue(node);
 }
 
 bool CodeGenVisitor::visitThis(ThisNode* node)
 {
+    // If we're using "this" from a capture, handle that.
+    if (const LambdaCapture* capture = findCurrentThisCapture())
+    {
+        emitEnvironmentValue(*capture, node->mResolvedType);
+        return true;
+    }
+
     // Note that this path is only taken if "this" is used as an rvalue.
     // If it's used as an lvalue, it should go through the storage address path.
     // Classes: "this" is always local 0, so we can just load that and be done.
@@ -186,6 +222,154 @@ bool CodeGenVisitor::visitThis(ThisNode* node)
 
     // Then push the entire thing onto the stack.
     return emitLoadFromPlace(Place::makeAddressOnStackPlace(node->mResolvedType));
+}
+
+const LambdaCapture* CodeGenVisitor::findCurrentCapture(Symbol* symbol) const
+{
+    if (mCurrentLambda == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Find the capture for a specific symbol.
+    for (const LambdaCapture& capture : mCurrentLambda->mCaptures)
+    {
+        if (capture.mKind == LambdaCaptureKind::cSymbol && capture.mSymbol == symbol)
+        {
+            return &capture;
+        }
+    }
+
+    return nullptr;
+}
+
+const LambdaCapture* CodeGenVisitor::findCurrentThisCapture() const
+{
+    if (mCurrentLambda == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Go through all the captures and find the one that is the "this".
+    for (const LambdaCapture& capture : mCurrentLambda->mCaptures)
+    {
+        if (capture.mKind == LambdaCaptureKind::cThis)
+        {
+            return &capture;
+        }
+    }
+
+    return nullptr;
+}
+
+Type* CodeGenVisitor::getLambdaCaptureType(const LambdaNode* lambda, const LambdaCapture& capture) const
+{
+    // If this is a symbol, return its type.
+    if (capture.mKind == LambdaCaptureKind::cSymbol)
+    {
+        return capture.mSymbol->mType;
+    }
+
+    // Otherwise this is "this", so get the type directly from the lambda node.
+    return lambda->mLexicalThisType;
+}
+
+void CodeGenVisitor::emitEnvironmentValue(const LambdaCapture& capture, Type* type)
+{
+    // Here, we load something from the lambda environment (from the heap).
+    // Get the size of the type we want to emit.
+    u32 words = layout::getWordSizeForType(type);
+    // Get the offset of the capture from the environment.
+    FieldOffset offset = static_cast<FieldOffset>(capture.mEnvironmentOffset);
+
+    // Emit the load.
+    if (words == 1)
+    {
+        emit<OpCode::cLoadCapture>(offset);
+    }
+    else
+    {
+        emit<OpCode::cLoadCaptureN>(offset, static_cast<OpWordCount>(words));
+    }
+}
+
+bool CodeGenVisitor::emitLambdaCaptureValue(const LambdaNode* lambda, const LambdaCapture& capture)
+{
+    // Push something onto the stack to initialize a field in an environment.
+    Type* captureType = getLambdaCaptureType(lambda, capture);
+
+    if (capture.mKind == LambdaCaptureKind::cThis)
+    {
+        // If it's a "this", check if we're nested.
+        if (const LambdaCapture* currentCapture = findCurrentThisCapture())
+        {
+            // If that is the case, use that.
+            emitEnvironmentValue(*currentCapture, captureType);
+            return true;
+        }
+
+        // Otherwise, it's the local at index 0.
+        emit<OpCode::cLoadLocal>(static_cast<LocalIdx>(0));
+
+        // For structs, we need to load the entire thing (at index 0) since it's a copy.
+        if (captureType->mKind == TypeKind::cStruct)
+        {
+            return emitLoadFromPlace(Place::makeAddressOnStackPlace(captureType));
+        }
+
+        return true;
+    }
+
+    // Otherwise, it's a symbol.
+    Symbol* symbol = capture.mSymbol;
+    // If it's already captured from an outer lambda, load it from there.
+    if (const LambdaCapture* currentCapture = findCurrentCapture(symbol))
+    {
+        emitEnvironmentValue(*currentCapture, captureType);
+        return true;
+    }
+
+    // Otherwise, this is a local.
+    LocalIdx localIndex = static_cast<LocalIdx>(symbol->mIndex);
+    if (symbol->mFlags.test(SymbolFlags::cInOut))
+    {
+        // An inout param is an address, so load that.
+        emit<OpCode::cLoadLocal>(localIndex);
+        return emitLoadFromPlace(Place::makeAddressOnStackPlace(captureType));
+    }
+
+    // Load it directly.
+    return emitLoadFromPlace(Place::makeLocalPlace(captureType, localIndex));
+}
+
+bool CodeGenVisitor::visitLambda(LambdaNode* node)
+{
+    // This emits the pair of lambda closure (environment) and function entry token.
+    // Get the function (lambda) index.
+    FunctionIdx functionIndex = static_cast<FunctionIdx>(node->mSymbol->mIndex);
+
+    if (node->mCaptures.empty())
+    {
+        // If we have 0 captures, we have a null environment.
+        emitIntegerImmediate(cNullRef);
+        // This means we don't have to create an environment and can directly push the converted index as entry token.
+        emit<OpCode::cPush32>(makeFunctionEntryToken(functionIndex));
+        return true;
+    }
+
+    // Push the captured values in environment layout order.
+    for (const LambdaCapture& capture : node->mCaptures)
+    {
+        if (emitLambdaCaptureValue(node, capture) == false)
+        {
+            return false;
+        }
+    }
+
+    // Create the closure (with the environment) based on what we just pushed before.
+    emit<OpCode::cNewClosure>(functionIndex);
+
+    return true;
 }
 
 bool CodeGenVisitor::visitIntLiteral(IntLiteralNode* node)
@@ -307,10 +491,33 @@ bool CodeGenVisitor::visitFunctionCall(FunctionCallNode* node)
             return emitMapMethodCall(node, memberAccess);
         }
 
-        return emitMethodCall(node, memberAccess);
+        // If this is a normal function, emit a direct call.
+        if (memberAccess->mSymbol != nullptr && memberAccess->mSymbol->mSymbolType == SymbolType::cMemberFunction)
+        {
+            return emitMethodCall(node, memberAccess);
+        }
+
+        // Otherwise, this is a call to a field, so it is indirect.
+        return emitIndirectFunctionCall(node);
     }
 
-    return emitFreeFunctionOrSyscallCall(node);
+    Symbol* directSymbol = nullptr;
+    if (node->mReceiver->mNodeType == NodeType::cIdentifier)
+    {
+        directSymbol = static_cast<IdentifierNode*>(node->mReceiver)->mSymbol;
+    }
+    else if (node->mReceiver->mNodeType == NodeType::cModuleAccess)
+    {
+        directSymbol = static_cast<ModuleAccessNode*>(node->mReceiver)->mSymbol;
+    }
+
+    if (directSymbol != nullptr &&
+        (directSymbol->mSymbolType == SymbolType::cFunction || directSymbol->mSymbolType == SymbolType::cSyscall))
+    {
+        return emitFreeFunctionOrSyscallCall(node);
+    }
+
+    return emitIndirectFunctionCall(node);
 }
 
 bool CodeGenVisitor::visitIndexCall(IndexCallNode* node)
@@ -384,9 +591,9 @@ bool CodeGenVisitor::visitBinaryOp(BinaryOpNode* node)
     // Equality is defined for more types, so handle these here.
     if (node->mOp == BinaryOp::cEQ || node->mOp == BinaryOp::cNE)
     {
-        if (leftType->mKind == TypeKind::cStruct)
+        if (leftType->mKind == TypeKind::cFunction || leftType->mKind == TypeKind::cStruct)
         {
-            return emitStructEqualityOperands(node);
+            return emitEqualityOperands(node);
         }
 
         if (leftType->mKind == TypeKind::cInterface && rightType->mKind == TypeKind::cInterface)

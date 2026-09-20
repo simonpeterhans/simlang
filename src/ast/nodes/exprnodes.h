@@ -9,8 +9,11 @@
 namespace simlang
 {
 
+class Scope;
 struct Identifier;
 struct InternedString;
+struct ParamNode;
+struct StatementNode;
 struct Symbol;
 struct Type;
 struct TypeSpecifierNode;
@@ -206,6 +209,51 @@ struct NewObjectNode : ExpressionNode
 
     // The selected class init method.
     Symbol* mInitMethodSymbol = nullptr;
+};
+
+enum class LambdaCaptureKind : u8
+{
+    cSymbol,
+    cThis
+};
+
+struct LambdaCapture
+{
+    // The symbol that is captured.
+    Symbol* mSymbol = nullptr;
+    // First use in the lambda that caused the variable to be captured.
+    SourceRange mFirstUseRange;
+    // Offset from the start of the closure on the heap.
+    u32 mEnvironmentOffset = 0;
+    // Symbol or "this".
+    LambdaCaptureKind mKind = LambdaCaptureKind::cSymbol;
+};
+
+struct LambdaNode : ExpressionNode
+{
+    explicit LambdaNode(SourceRange range,
+                        ArrayView<ParamNode*> params,
+                        TypeSpecifierNode* returnTypeSpec,
+                        StatementNode* body)
+        : ExpressionNode(NodeType::cLambda, range)
+        , mParams(params)
+        , mReturnTypeSpec(returnTypeSpec)
+        , mBody(body)
+    {
+    }
+
+    ArrayView<ParamNode*> mParams;
+    TypeSpecifierNode* mReturnTypeSpec;
+    StatementNode* mBody;
+
+    // Resolved semantic data.
+    Symbol* mSymbol = nullptr;
+    Scope* mScope = nullptr;
+    Type* mLexicalThisType = nullptr;
+    ArrayView<LambdaCapture> mCaptures;
+
+    // Assigned during backend layout. Zero means that no environment is needed.
+    u32 mEnvironmentTypeID = 0;
 };
 
 struct FunctionCallNode : ExpressionNode
