@@ -350,45 +350,24 @@ bool CodeGenVisitor::visitLambda(LambdaNode* node)
 
     if (node->mCaptures.empty())
     {
-        // If we have 0 captures, we have a null environment and are already done.
+        // If we have 0 captures, we have a null environment.
         emitIntegerImmediate(cNullRef);
+        // This means we don't have to create an environment and can directly push the converted index as entry token.
+        emit<OpCode::cPush32>(makeFunctionEntryToken(functionIndex));
+        return true;
     }
-    else
+
+    // Push the captured values in environment layout order.
+    for (const LambdaCapture& capture : node->mCaptures)
     {
-        // Otherwise, we need to create a new object in the form of the environment.
-        emit<OpCode::cNewObject>(static_cast<TypeID>(node->mEnvironmentTypeID));
-
-        // Then, we need to load all the captures.
-        for (const LambdaCapture& capture : node->mCaptures)
+        if (emitLambdaCaptureValue(node, capture) == false)
         {
-            // Keep the environment ref we just created on the stack.
-            emit<OpCode::cDup>();
-
-            // Do the load of the value.
-            if (emitLambdaCaptureValue(node, capture) == false)
-            {
-                return false;
-            }
-
-            // Find out the size of it and the offset we have to store it at.
-            Type* captureType = getLambdaCaptureType(node, capture);
-            u32 words = layout::getWordSizeForType(captureType);
-            FieldOffset offset = static_cast<FieldOffset>(capture.mEnvironmentOffset);
-
-            // Do the store.
-            if (words == 1)
-            {
-                emit<OpCode::cStoreObjField>(offset);
-            }
-            else
-            {
-                emit<OpCode::cStoreObjFieldN>(offset, static_cast<OpWordCount>(words));
-            }
+            return false;
         }
     }
 
-    // Also push the function entry token.
-    emit<OpCode::cPush32>(makeFunctionEntryToken(functionIndex));
+    // Create the closure (with the environment) based on what we just pushed before.
+    emit<OpCode::cNewClosure>(functionIndex);
 
     return true;
 }

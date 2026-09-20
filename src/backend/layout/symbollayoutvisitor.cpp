@@ -192,6 +192,8 @@ bool SymbolLayoutVisitor::visitLambda(LambdaNode* node)
 
         // Register as a new type.
         node->mEnvironmentTypeID = mCtx.mBackend.mNextTypeID++;
+        // Set the type ID for the environment so we know at runtime what it captures.
+        mCtx.mBackend.mFunctionInfos[functionIndex].mEnvironmentTypeID = static_cast<TypeID>(node->mEnvironmentTypeID);
 
         // Count the words that the environment requires on the heap.
         u64 environmentWords = 0;

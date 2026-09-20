@@ -28,6 +28,7 @@ X( Push32,            1,    u32,              mInt32,        void,            _2
 X( PushString,        1,    StringLiteralIdx, mIndex,        void,            _2 )
 
 X( NewObject,         1,    TypeID,           mTypeID,       void,            _2 )
+X( NewClosure,        1,    FunctionIdx,      mIndex,        void,            _2 )
 X( NewList,           1,    TypeID,           mTypeID,       void,            _2 )
 X( NewMap,            2,    TypeID,           mKeyTypeID,    TypeID,          mValueTypeID )
 

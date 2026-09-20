@@ -521,6 +521,11 @@ void BytecodeDump::writeOperandList(const Op& op)
                 writeTypeIndex("mTypeID", op.as.mNewObject.mTypeID);
                 return;
             }
+            case OpCode::cNewClosure:
+            {
+                writeFunctionIndex("mIndex", op.as.mNewClosure.mIndex);
+                return;
+            }
             case OpCode::cNewList:
             {
                 writeTypeIndex("mTypeID", op.as.mNewList.mTypeID);
@@ -655,6 +660,12 @@ void BytecodeDump::writeFunctionTable()
         mOut << "  frame: arg-words=" << info.mArgWords << ", local-words=" << info.mLocalWords
              << ", return-words=" << info.mReturnWords << ", max-stack=" << info.mMaxStackWords << "\n";
         mOut << "  bytecode-entry: " << info.mEntryAddress << "\n";
+        if (info.mEnvironmentTypeID != cInvalidTypeID)
+        {
+            mOut << "  environment: ";
+            writeTypeIndex("mEnvironmentTypeID", info.mEnvironmentTypeID);
+            mOut << "\n";
+        }
         writeDeclLocation(symbol);
     }
 }

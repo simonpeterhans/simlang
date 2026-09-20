@@ -1989,6 +1989,47 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(NewClosure)
+    {
+        // Code:  NewClosure(index: FunctionIdx)
+        // Stack: [captureWordN-1, ..., captureWord0, ...] -> [entryToken, context, ...]
+        FunctionIdx index = readPC<FunctionIdx>(pc);
+
+        // Get the environment type ID so we know its captured size.
+        TypeID environmentTypeID = mImage.mFunctionInfos[index].mEnvironmentTypeID;
+        const TypeLayout& environment = mImage.mTypeLayoutTable.getLayout(environmentTypeID);
+        u32 captureWords = environment.getSizeOnHeap();
+
+        // Find out where our captures start on the stack.
+        VMWord* captures = sp - captureWords;
+
+        // We need to sync here so the heap gets the correct stack roots (!).
+        STACK_SYNC();
+
+        VMWord context = mHeap.allocateObject(environmentTypeID, captureWords, *this);
+        if (context == cNullRef)
+        {
+            reportRuntimeError(getRuntimeErrorAddress(pc, code),
+                               RuntimeErrorKind::cAllocationFailed,
+                               toRuntimeErrorByteCount(captureWords));
+            // Replace the captured values with 0/0 (invalid callable).
+            sp = captures;
+            *sp++ = cNullRef;
+            *sp++ = cInvalidFunctionEntryToken;
+            VM_END_OP_CHECKED();
+        }
+
+        // The captures are contiguous in the same order as the environment fields.
+        VMWord* dst = &mHeap.wordAt(getHeapPayload(context));
+        copyWords(dst, captures, captureWords);
+
+        // Replace the captured values with the callable.
+        sp = captures;
+        *sp++ = context;
+        *sp++ = makeFunctionEntryToken(index);
+
+        VM_END_OP();
+    }
     VM_OP(NewList)
     {
         // Code:  NewList(typeID: TypeID)
@@ -2102,14 +2143,6 @@ bool VM::run()
 
         // Look up the context address on the stack (under the function token).
         VMWord context = stackBase[fp - cFunctionValueWordCount + cFunctionValueContextWord];
-
-        // If this isn't a heap address, something went wrong.
-        if (isHeapAddress(context) == false)
-        {
-            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
-            *sp++ = cInvalidAddress;
-            VM_END_OP_CHECKED();
-        }
 
         // Get the context data and offset it by the field.
         HeapIndex fieldIndex = getHeapPayload(context) + fieldOffset;
@@ -2235,14 +2268,6 @@ bool VM::run()
         // Look up the context address on the stack (under the function token).
         VMWord context = stackBase[fp - cFunctionValueWordCount + cFunctionValueContextWord];
 
-        // If this isn't a heap address, something went wrong.
-        if (isHeapAddress(context) == false)
-        {
-            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
-            *sp++ = 0;
-            VM_END_OP_CHECKED();
-        }
-
         // Get the context data and offset it by the field.
         HeapIndex index = getHeapPayload(context) + fieldOffset;
         // Directly push the value at the index onto the stack.
@@ -2264,15 +2289,6 @@ bool VM::run()
         VMWord* dst = sp;
         // Push N words.
         sp += size;
-
-        // If this isn't a heap address, something went wrong.
-        if (isHeapAddress(context) == false)
-        {
-            reportReferenceRuntimeError(getRuntimeErrorAddress(pc, code), context);
-            // If the address is invalid, push zeros.
-            std::memset(dst, 0, size * sizeof(VMWord));
-            VM_END_OP_CHECKED();
-        }
 
         // Get the context data and offset it by the field.
         HeapIndex index = getHeapPayload(context) + fieldOffset;

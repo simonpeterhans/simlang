@@ -228,6 +228,13 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             const InterfaceCallInfo& info = mBackend.mInterfaceCallInfos[op.as.mCallInterface.mIndex];
             return replaceStackWords(height, static_cast<u32>(info.mArgWords) + 2U, info.mReturnWords);
         }
+        case OpCode::cNewClosure:
+        {
+            // Here, we consume the captured variables and push the environment and entry token.
+            const FunctionInfo& function = mBackend.mFunctionInfos[op.as.mNewClosure.mIndex];
+            const TypeLayout& environment = mBackend.mTypeLayoutTable.getLayout(function.mEnvironmentTypeID);
+            return replaceStackWords(height, environment.getSizeOnHeap(), cFunctionValueWordCount);
+        }
 
         case OpCode::cJumpZ:
         case OpCode::cJumpNZ:
