@@ -45,7 +45,7 @@ public:
     {
     }
 
-    TypeSpecifierNode* cloneNamedTypeSpecifier(NamedTypeSpecifierNode* node)
+    TypeSpecifierNode* visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
     {
         // For templates, we clone the AST exactly, but we have to replace any type arguments.
         // For a type to be replaceable, it must be a template parameter and have no type arguments.
@@ -66,7 +66,8 @@ public:
             }
         }
 
-        return ASTCloner::cloneNamedTypeSpecifier(node);
+        // Otherwise, clone normally.
+        return ASTCloner::visitNamedTypeSpecifier(node);
     }
 
 private:

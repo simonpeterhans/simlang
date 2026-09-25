@@ -1,22 +1,17 @@
 #pragma once
 
+#include <type_traits>
 #include <utility>
-#include <vector>
 
-#include "ast/nodes/astnode.h"
-#include "ast/nodes/exprnodes.h"
-#include "ast/nodes/paramnodes.h"
-#include "ast/nodes/stmtnodes.h"
-#include "ast/nodes/translationunitnode.h"
-#include "ast/nodes/typespecifiernodes.h"
+#include "ast/astvisitorbase.h"
 #include "util/arena.h"
-#include "util/arenautils.h"
+#include "util/arrayview.h"
 
 namespace simlang
 {
 
 template <typename Derived>
-class ASTCloner
+class ASTCloner : public ASTVisitorBase<Derived, ASTNode*>
 {
 public:
     explicit ASTCloner(ArenaAllocator& allocator)
@@ -24,28 +19,7 @@ public:
     {
     }
 
-    ASTNode* clone(ASTNode* n)
-    {
-        if (n == nullptr)
-        {
-            return nullptr;
-        }
-
-        switch (n->mNodeType)
-        {
-#define DISPATCH_CASE(name) \
-    case NodeType::c##name: return static_cast<Derived*>(this)->clone##name(static_cast<name##Node*>(n));
-
-#define X(name) DISPATCH_CASE(name)
-
-#include "ast/nodes/nodetypes.def"
-
-#undef X
-#undef DISPATCH_CASE
-        }
-
-        return nullptr;
-    }
+    ASTNode* clone(ASTNode* n) { return this->visit(n); }
 
     ExpressionNode* cloneExpression(ExpressionNode* n) { return static_cast<ExpressionNode*>(clone(n)); }
 
@@ -55,395 +29,286 @@ public:
 
     TypeSpecifierNode* cloneTypeSpecifier(TypeSpecifierNode* n) { return static_cast<TypeSpecifierNode*>(clone(n)); }
 
-    ExpressionNode* cloneImplicitCast(ImplicitCastNode* n)
+    ExpressionNode* visitImplicitCast(ImplicitCastNode* n) { return rebuild<ImplicitCastNode>(n, n->mTarget); }
+
+    ExpressionNode* visitCast(CastNode* n) { return rebuild<CastNode>(n, n->mTypeSpecifier, n->mTarget); }
+
+    ExpressionNode* visitIdentifier(IdentifierNode* n) { return rebuild<IdentifierNode>(n, n->mIdentifier); }
+
+    ExpressionNode* visitThis(ThisNode* n) { return rebuild<ThisNode>(n); }
+
+    ExpressionNode* visitIntLiteral(IntLiteralNode* n) { return rebuild<IntLiteralNode>(n, n->mInt); }
+
+    ExpressionNode* visitFloatLiteral(FloatLiteralNode* n) { return rebuild<FloatLiteralNode>(n, n->mFloat); }
+
+    ExpressionNode* visitBoolLiteral(BoolLiteralNode* n) { return rebuild<BoolLiteralNode>(n, n->mBool); }
+
+    ExpressionNode* visitStringLiteral(StringLiteralNode* n) { return rebuild<StringLiteralNode>(n, n->mString); }
+
+    ExpressionNode* visitNullLiteral(NullLiteralNode* n) { return rebuild<NullLiteralNode>(n); }
+
+    ExpressionNode* visitFormatString(FormatStringNode* n)
     {
-        ExpressionNode* child = cloneExpression(n->mTarget);
-        return cloneNode<ImplicitCastNode>(n, child);
+        return rebuild<FormatStringNode>(n, n->mLiterals, n->mArgs);
     }
 
-    ExpressionNode* cloneCast(CastNode* n)
+    ExpressionNode* visitNewObject(NewObjectNode* n)
     {
-        TypeSpecifierNode* typeSpecifier = cloneTypeSpecifier(n->mTypeSpecifier);
-        ExpressionNode* child = cloneExpression(n->mTarget);
-        return cloneNode<CastNode>(n, typeSpecifier, child);
+        return rebuild<NewObjectNode>(n,
+                                      n->mTypeSpecifier,
+                                      n->mFieldInitializers,
+                                      n->mInitializerArguments,
+                                      n->mConstructionKind);
     }
 
-    ExpressionNode* cloneIdentifier(IdentifierNode* n) { return cloneNode<IdentifierNode>(n, n->mIdentifier); }
-
-    ExpressionNode* cloneThis(ThisNode* n) { return cloneNode<ThisNode>(n); }
-
-    ExpressionNode* cloneIntLiteral(IntLiteralNode* n) { return cloneNode<IntLiteralNode>(n, n->mInt); }
-
-    ExpressionNode* cloneFloatLiteral(FloatLiteralNode* n) { return cloneNode<FloatLiteralNode>(n, n->mFloat); }
-
-    ExpressionNode* cloneBoolLiteral(BoolLiteralNode* n) { return cloneNode<BoolLiteralNode>(n, n->mBool); }
-
-    ExpressionNode* cloneStringLiteral(StringLiteralNode* n) { return cloneNode<StringLiteralNode>(n, n->mString); }
-
-    ExpressionNode* cloneNullLiteral(NullLiteralNode* n) { return cloneNode<NullLiteralNode>(n); }
-
-    ExpressionNode* cloneFormatString(FormatStringNode* n)
+    ExpressionNode* visitLambda(LambdaNode* n)
     {
-        std::vector<ExpressionNode*> args;
-        args.reserve(n->mArgs.size());
-        for (ExpressionNode* arg : n->mArgs)
-        {
-            ExpressionNode* clonedArg = cloneExpression(arg);
-            args.push_back(clonedArg);
-        }
-
-        return cloneNode<FormatStringNode>(n, n->mLiterals, makeArrayView(mAllocator, args));
+        return rebuild<LambdaNode>(n, n->mParams, n->mReturnTypeSpec, n->mBody);
     }
 
-    ExpressionNode* cloneNewObject(NewObjectNode* n)
+    ExpressionNode* visitFunctionCall(FunctionCallNode* n)
     {
-        std::vector<CallArgument> args;
-        args.reserve(n->mInitializerArguments.size());
-        for (const CallArgument& arg : n->mInitializerArguments)
-        {
-            ExpressionNode* clonedValue = cloneExpression(arg.mValue);
-            args.push_back(CallArgument{arg.mSourceRange, clonedValue, arg.mIsInOut});
-        }
-
-        std::vector<FieldInitializer*> fields;
-        fields.reserve(n->mFieldInitializers.size());
-        for (FieldInitializer* init : n->mFieldInitializers)
-        {
-            ExpressionNode* value = cloneExpression(init->mValue);
-            fields.push_back(mAllocator.create<FieldInitializer>(init->mSourceRange,
-                                                                 init->mIdentifierRange,
-                                                                 init->mIdentifier,
-                                                                 value));
-        }
-
-        TypeSpecifierNode* typeSpecifier = cloneTypeSpecifier(n->mTypeSpecifier);
-        return cloneNode<NewObjectNode>(n,
-                                        typeSpecifier,
-                                        makeArrayView(mAllocator, fields),
-                                        makeArrayView(mAllocator, args),
-                                        n->mConstructionKind);
+        return rebuild<FunctionCallNode>(n, n->mReceiver, n->mArgs);
     }
 
-    ExpressionNode* cloneLambda(LambdaNode* n)
-    {
-        std::vector<ParamNode*> params;
-        params.reserve(n->mParams.size());
-        for (ParamNode* param : n->mParams)
-        {
-            params.push_back(cloneParam(param));
-        }
+    ExpressionNode* visitIndexCall(IndexCallNode* n) { return rebuild<IndexCallNode>(n, n->mReceiver, n->mIndex); }
 
-        TypeSpecifierNode* returnTypeSpec = cloneTypeSpecifier(n->mReturnTypeSpec);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<LambdaNode>(n, makeArrayView(mAllocator, params), returnTypeSpec, body);
+    ExpressionNode* visitMemberAccess(MemberAccessNode* n)
+    {
+        return rebuild<MemberAccessNode>(n, n->mReceiver, n->mMember);
     }
 
-    ExpressionNode* cloneFunctionCall(FunctionCallNode* n)
-    {
-        std::vector<CallArgument> args;
-        args.reserve(n->mArgs.size());
-        for (const CallArgument& arg : n->mArgs)
-        {
-            ExpressionNode* clonedValue = cloneExpression(arg.mValue);
-            args.push_back(CallArgument{arg.mSourceRange, clonedValue, arg.mIsInOut});
-        }
+    ExpressionNode* visitModuleAccess(ModuleAccessNode* n) { return rebuild<ModuleAccessNode>(n, n->mLeft, n->mRight); }
 
-        ExpressionNode* receiver = cloneExpression(n->mReceiver);
-        return cloneNode<FunctionCallNode>(n, receiver, makeArrayView(mAllocator, args));
+    ExpressionNode* visitUnaryOp(UnaryOpNode* n) { return rebuild<UnaryOpNode>(n, n->mOp, n->mExpr); }
+
+    ExpressionNode* visitBinaryOp(BinaryOpNode* n) { return rebuild<BinaryOpNode>(n, n->mOp, n->mLeft, n->mRight); }
+
+    ExpressionNode* visitTernaryExpr(TernaryExprNode* n)
+    {
+        return rebuild<TernaryExprNode>(n, n->mCondition, n->mThenExpr, n->mElseExpr);
     }
 
-    ExpressionNode* cloneIndexCall(IndexCallNode* n)
+    StatementNode* visitEmptyStatement(EmptyStatementNode* n) { return rebuild<EmptyStatementNode>(n); }
+
+    StatementNode* visitBlockStatement(BlockStatementNode* n) { return rebuild<BlockStatementNode>(n, n->mStatements); }
+
+    StatementNode* visitExpressionStatement(ExpressionStatementNode* n)
     {
-        ExpressionNode* receiver = cloneExpression(n->mReceiver);
-        ExpressionNode* index = cloneExpression(n->mIndex);
-        return cloneNode<IndexCallNode>(n, receiver, index);
+        return rebuild<ExpressionStatementNode>(n, n->mExpression);
     }
 
-    ExpressionNode* cloneMemberAccess(MemberAccessNode* n)
+    StatementNode* visitAssignmentStatement(AssignmentStatementNode* n)
     {
-        ExpressionNode* receiver = cloneExpression(n->mReceiver);
-        return cloneNode<MemberAccessNode>(n, receiver, n->mMember);
+        return rebuild<AssignmentStatementNode>(n, n->mLHS, n->mRHS, n->mOp);
     }
 
-    ExpressionNode* cloneModuleAccess(ModuleAccessNode* n)
+    StatementNode* visitVariableDeclarationStatement(VariableDeclarationStatementNode* n)
     {
-        ExpressionNode* left = cloneExpression(n->mLeft);
-        ExpressionNode* right = cloneExpression(n->mRight);
-        return cloneNode<ModuleAccessNode>(n, left, right);
+        return rebuild<VariableDeclarationStatementNode>(n,
+                                                         n->mIdentifierRange,
+                                                         n->mIdentifier,
+                                                         n->mTypeSpec,
+                                                         n->mInit);
     }
 
-    ExpressionNode* cloneUnaryOp(UnaryOpNode* n)
+    StatementNode* visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* n)
     {
-        ExpressionNode* expr = cloneExpression(n->mExpr);
-        return cloneNode<UnaryOpNode>(n, n->mOp, expr);
+        return rebuild<FunctionDeclarationStatementNode>(n,
+                                                         n->mIdentifierRange,
+                                                         n->mIdentifier,
+                                                         n->mParams,
+                                                         n->mReturnTypeSpec,
+                                                         n->mBody,
+                                                         n->mIsInitMethod);
     }
 
-    ExpressionNode* cloneBinaryOp(BinaryOpNode* n)
+    StatementNode* visitTypeDeclarationStatement(TypeDeclarationStatementNode* n)
     {
-        ExpressionNode* left = cloneExpression(n->mLeft);
-        ExpressionNode* right = cloneExpression(n->mRight);
-        return cloneNode<BinaryOpNode>(n, n->mOp, left, right);
-    }
-
-    ExpressionNode* cloneTernaryExpr(TernaryExprNode* n)
-    {
-        ExpressionNode* condition = cloneExpression(n->mCondition);
-        ExpressionNode* thenExpr = cloneExpression(n->mThenExpr);
-        ExpressionNode* elseExpr = cloneExpression(n->mElseExpr);
-        return cloneNode<TernaryExprNode>(n, condition, thenExpr, elseExpr);
-    }
-
-    StatementNode* cloneEmptyStatement(EmptyStatementNode* n) { return cloneNode<EmptyStatementNode>(n); }
-
-    StatementNode* cloneBlockStatement(BlockStatementNode* n)
-    {
-        std::vector<StatementNode*> statements;
-        statements.reserve(n->mStatements.size());
-        for (StatementNode* statement : n->mStatements)
-        {
-            StatementNode* clonedStatement = cloneStatement(statement);
-            statements.push_back(clonedStatement);
-        }
-
-        return cloneNode<BlockStatementNode>(n, makeArrayView(mAllocator, statements));
-    }
-
-    StatementNode* cloneExpressionStatement(ExpressionStatementNode* n)
-    {
-        ExpressionNode* expression = cloneExpression(n->mExpression);
-        return cloneNode<ExpressionStatementNode>(n, expression);
-    }
-
-    StatementNode* cloneAssignmentStatement(AssignmentStatementNode* n)
-    {
-        ExpressionNode* lhs = cloneExpression(n->mLHS);
-        ExpressionNode* rhs = cloneExpression(n->mRHS);
-        return cloneNode<AssignmentStatementNode>(n, lhs, rhs, n->mOp);
-    }
-
-    StatementNode* cloneVariableDeclarationStatement(VariableDeclarationStatementNode* n)
-    {
-        TypeSpecifierNode* typeSpec = cloneTypeSpecifier(n->mTypeSpec);
-        ExpressionNode* init = cloneExpression(n->mInit);
-        return cloneNode<VariableDeclarationStatementNode>(n, n->mIdentifierRange, n->mIdentifier, typeSpec, init);
-    }
-
-    StatementNode* cloneFunctionDeclarationStatement(FunctionDeclarationStatementNode* n)
-    {
-        std::vector<ParamNode*> params;
-        params.reserve(n->mParams.size());
-        for (ParamNode* param : n->mParams)
-        {
-            ParamNode* clonedParam = cloneParam(param);
-            params.push_back(clonedParam);
-        }
-
-        TypeSpecifierNode* returnTypeSpec = cloneTypeSpecifier(n->mReturnTypeSpec);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<FunctionDeclarationStatementNode>(n,
-                                                           n->mIdentifierRange,
-                                                           n->mIdentifier,
-                                                           makeArrayView(mAllocator, params),
-                                                           returnTypeSpec,
-                                                           body,
-                                                           n->mIsInitMethod);
-    }
-
-    StatementNode* cloneTypeDeclarationStatement(TypeDeclarationStatementNode* n)
-    {
-        std::vector<StatementNode*> members;
-        members.reserve(n->mMembers.size());
-        for (StatementNode* member : n->mMembers)
-        {
-            StatementNode* clonedMember = cloneStatement(member);
-            members.push_back(clonedMember);
-        }
-
-        std::vector<TypeSpecifierNode*> implementedInterfaces;
-        implementedInterfaces.reserve(n->mImplementedInterfaces.size());
-        for (TypeSpecifierNode* iface : n->mImplementedInterfaces)
-        {
-            TypeSpecifierNode* clonedIface = cloneTypeSpecifier(iface);
-            implementedInterfaces.push_back(clonedIface);
-        }
-
-        auto* cloned = cloneNode<TypeDeclarationStatementNode>(n,
-                                                               n->mIdentifierRange,
-                                                               n->mIdentifier,
-                                                               makeArrayView(mAllocator, members),
-                                                               n->mTemplateParams,
-                                                               n->mKind,
-                                                               makeArrayView(mAllocator, implementedInterfaces));
+        auto* cloned = rebuild<TypeDeclarationStatementNode>(n,
+                                                             n->mIdentifierRange,
+                                                             n->mIdentifier,
+                                                             n->mMembers,
+                                                             n->mTemplateParams,
+                                                             n->mKind,
+                                                             n->mImplementedInterfaces);
         cloned->mDeclModule = n->mDeclModule;
         return cloned;
     }
 
-    StatementNode* cloneImportDeclarationStatement(ImportDeclarationStatementNode* n)
+    StatementNode* visitImportDeclarationStatement(ImportDeclarationStatementNode* n)
     {
-        std::vector<ImportSelectedEntry*> selected;
-        selected.reserve(n->mSelected.size());
-        for (ImportSelectedEntry* entry : n->mSelected)
-        {
-            if (entry == nullptr)
-            {
-                selected.push_back(nullptr);
-                continue;
-            }
-
-            selected.push_back(mAllocator.create<ImportSelectedEntry>(entry->mName, entry->mAlias));
-        }
-
-        auto* cloned = cloneNode<ImportDeclarationStatementNode>(n,
-                                                                 n->mPath,
-                                                                 makeArrayView(mAllocator, selected),
-                                                                 n->mAlias,
-                                                                 n->mIsRelative);
+        auto* cloned = rebuild<ImportDeclarationStatementNode>(n, n->mPath, n->mSelected, n->mAlias, n->mIsRelative);
         cloned->mResolvedModule = n->mResolvedModule;
         return cloned;
     }
 
-    StatementNode* cloneIfBranchStatement(IfBranchStatementNode* n)
+    StatementNode* visitIfBranchStatement(IfBranchStatementNode* n)
     {
-        ExpressionNode* condition = cloneExpression(n->mCondition);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<IfBranchStatementNode>(n, condition, body);
+        return rebuild<IfBranchStatementNode>(n, n->mCondition, n->mBody);
     }
 
-    StatementNode* cloneIfStatement(IfStatementNode* n)
+    StatementNode* visitIfStatement(IfStatementNode* n)
     {
-        std::vector<IfBranchStatementNode*> branches;
-        branches.reserve(n->mBranches.size());
-        for (IfBranchStatementNode* branch : n->mBranches)
-        {
-            StatementNode* clonedStatement = cloneStatement(branch);
-            auto* clonedBranch = static_cast<IfBranchStatementNode*>(clonedStatement);
-            branches.push_back(clonedBranch);
-        }
-
-        StatementNode* elseBody = cloneStatement(n->mElseBody);
-        return cloneNode<IfStatementNode>(n, makeArrayView(mAllocator, branches), elseBody);
+        return rebuild<IfStatementNode>(n, n->mBranches, n->mElseBody);
     }
 
-    StatementNode* cloneForStatement(ForStatementNode* n)
+    StatementNode* visitForStatement(ForStatementNode* n)
     {
-        StatementNode* init = cloneStatement(n->mInit);
-        ExpressionNode* condition = cloneExpression(n->mCondition);
-        StatementNode* increment = cloneStatement(n->mIncrement);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<ForStatementNode>(n, init, condition, increment, body);
+        return rebuild<ForStatementNode>(n, n->mInit, n->mCondition, n->mIncrement, n->mBody);
     }
 
-    StatementNode* cloneWhileStatement(WhileStatementNode* n)
+    StatementNode* visitWhileStatement(WhileStatementNode* n)
     {
-        ExpressionNode* condition = cloneExpression(n->mCondition);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<WhileStatementNode>(n, condition, body);
+        return rebuild<WhileStatementNode>(n, n->mCondition, n->mBody);
     }
 
-    StatementNode* cloneSwitchSectionStatement(SwitchSectionStatementNode* n)
+    StatementNode* visitSwitchSectionStatement(SwitchSectionStatementNode* n)
     {
-        ExpressionNode* caseExpression = cloneExpression(n->mCaseExpression);
-        StatementNode* body = cloneStatement(n->mBody);
-        return cloneNode<SwitchSectionStatementNode>(n, caseExpression, body);
+        return rebuild<SwitchSectionStatementNode>(n, n->mCaseExpression, n->mBody);
     }
 
-    StatementNode* cloneSwitchStatement(SwitchStatementNode* n)
+    StatementNode* visitSwitchStatement(SwitchStatementNode* n)
     {
-        std::vector<SwitchSectionStatementNode*> sections;
-        sections.reserve(n->mSections.size());
-        for (SwitchSectionStatementNode* section : n->mSections)
-        {
-            StatementNode* clonedStatement = cloneStatement(section);
-            auto* clonedSection = static_cast<SwitchSectionStatementNode*>(clonedStatement);
-            sections.push_back(clonedSection);
-        }
-
-        ExpressionNode* expression = cloneExpression(n->mExpression);
-        return cloneNode<SwitchStatementNode>(n, expression, makeArrayView(mAllocator, sections));
+        return rebuild<SwitchStatementNode>(n, n->mExpression, n->mSections);
     }
 
-    StatementNode* cloneReturnStatement(ReturnStatementNode* n)
+    StatementNode* visitReturnStatement(ReturnStatementNode* n)
     {
-        ExpressionNode* expression = cloneExpression(n->mExpression);
-        return cloneNode<ReturnStatementNode>(n, expression);
+        return rebuild<ReturnStatementNode>(n, n->mExpression);
     }
 
-    StatementNode* cloneBreakStatement(BreakStatementNode* n) { return cloneNode<BreakStatementNode>(n); }
+    StatementNode* visitBreakStatement(BreakStatementNode* n) { return rebuild<BreakStatementNode>(n); }
 
-    StatementNode* cloneContinueStatement(ContinueStatementNode* n) { return cloneNode<ContinueStatementNode>(n); }
+    StatementNode* visitContinueStatement(ContinueStatementNode* n) { return rebuild<ContinueStatementNode>(n); }
 
-    StatementNode* clonePrintStatement(PrintStatementNode* n)
-    {
-        ExpressionNode* expression = cloneExpression(n->mExpression);
-        return cloneNode<PrintStatementNode>(n, expression);
-    }
+    StatementNode* visitPrintStatement(PrintStatementNode* n) { return rebuild<PrintStatementNode>(n, n->mExpression); }
 
     // Parameters.
-    ParamNode* cloneParamDeclaration(ParamDeclarationNode* n)
+    ParamNode* visitParamDeclaration(ParamDeclarationNode* n)
     {
-        TypeSpecifierNode* typeSpec = cloneTypeSpecifier(n->mTypeSpec);
-        ExpressionNode* defaultValue = cloneExpression(n->mDefaultValue);
-        return cloneNode<ParamDeclarationNode>(n,
-                                               n->mIdentifierRange,
-                                               n->mIdentifier,
-                                               typeSpec,
-                                               defaultValue,
-                                               n->mIsInOut);
+        return rebuild<ParamDeclarationNode>(n,
+                                             n->mIdentifierRange,
+                                             n->mIdentifier,
+                                             n->mTypeSpec,
+                                             n->mDefaultValue,
+                                             n->mIsInOut);
     }
 
-    TypeSpecifierNode* cloneNamedTypeSpecifier(NamedTypeSpecifierNode* n)
+    TypeSpecifierNode* visitNamedTypeSpecifier(NamedTypeSpecifierNode* n)
     {
-        std::vector<TypeSpecifierNode*> args;
-        args.reserve(n->mTypeArgs.size());
-        for (TypeSpecifierNode* arg : n->mTypeArgs)
-        {
-            TypeSpecifierNode* clonedArg = cloneTypeSpecifier(arg);
-            args.push_back(clonedArg);
-        }
-
-        ExpressionNode* nameExpression = cloneExpression(n->mNameExpression);
-        return cloneNode<NamedTypeSpecifierNode>(n, nameExpression, makeArrayView(mAllocator, args));
+        return rebuild<NamedTypeSpecifierNode>(n, n->mNameExpression, n->mTypeArgs);
     }
 
-    TypeSpecifierNode* cloneFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
+    TypeSpecifierNode* visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
     {
-        std::vector<FunctionTypeParameterSpecifier> params;
-        params.reserve(n->mParams.size());
-        for (const FunctionTypeParameterSpecifier& param : n->mParams)
-        {
-            TypeSpecifierNode* typeSpecifier = cloneTypeSpecifier(param.mTypeSpecifier);
-            params.push_back(FunctionTypeParameterSpecifier{param.mSourceRange, typeSpecifier, param.mIsInOut});
-        }
-
-        TypeSpecifierNode* returnTypeSpecifier = cloneTypeSpecifier(n->mReturnTypeSpecifier);
-        return cloneNode<FunctionTypeSpecifierNode>(n, makeArrayView(mAllocator, params), returnTypeSpecifier);
+        return rebuild<FunctionTypeSpecifierNode>(n, n->mParams, n->mReturnTypeSpecifier);
     }
 
-    TypeSpecifierNode* cloneSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* n)
+    TypeSpecifierNode* visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* n)
     {
-        return cloneNode<SubstitutedTypeSpecifierNode>(n, n->mType);
+        return rebuild<SubstitutedTypeSpecifierNode>(n, n->mType);
     }
 
-    TranslationUnitNode* cloneTranslationUnit(TranslationUnitNode* n)
+    TranslationUnitNode* visitTranslationUnit(TranslationUnitNode* n)
     {
-        std::vector<ASTNode*> nodes;
-        nodes.reserve(n->mNodes.size());
-        for (ASTNode* node : n->mNodes)
-        {
-            ASTNode* clonedNode = clone(node);
-            nodes.push_back(clonedNode);
-        }
-
-        return cloneNode<TranslationUnitNode>(n, makeArrayView(mAllocator, nodes));
+        return rebuild<TranslationUnitNode>(n, n->mNodes);
     }
 
 protected:
+    // Rebuilding the node creates a new node with all fields of it cloned.
+    template <typename Node, typename... Args>
+    Node* rebuild(const ASTNode* original, const Args&... args)
+    {
+        // Pass the cloned fields to the cloner as constructor args.
+        return cloneNode<Node>(original, cloneField(args)...);
+    }
+
     template <typename Node, typename... Args>
     Node* cloneNode(const ASTNode* original, Args&&... args) const
     {
         auto* cloned = mAllocator.create<Node>(original->mSourceRange, std::forward<Args>(args)...);
+        // We also have to clone the flags.
         cloned->mFlags = original->mFlags;
         return cloned;
+    }
+
+    // Generic cloner.
+    template <typename T>
+    T cloneField(T value)
+    {
+        // Complain if we're not a primitive (and didn't match an overload).
+        static_assert(std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, SourceRange>,
+                      "Missing clone method for field type!");
+        return value;
+    }
+
+    // Trivial cloners.
+    Identifier* cloneField(Identifier* value) { return value; }
+    const InternedString* cloneField(const InternedString* value) { return value; }
+    Type* cloneField(Type* value) { return value; }
+
+    // Array view cloner.
+    template <typename T>
+    ArrayView<T> cloneField(ArrayView<T> values)
+    {
+        T* data = mAllocator.createArray<T>(values.size());
+        for (usize i = 0; i < values.size(); ++i)
+        {
+            data[i] = cloneField(values[i]);
+        }
+
+        return ArrayView<T>{data, values.size()};
+    }
+
+    // Specific field cloners.
+    ASTNode* cloneField(ASTNode* n) { return clone(n); }
+    ExpressionNode* cloneField(ExpressionNode* n) { return cloneExpression(n); }
+    StatementNode* cloneField(StatementNode* n) { return cloneStatement(n); }
+    ParamNode* cloneField(ParamNode* n) { return cloneParam(n); }
+    TypeSpecifierNode* cloneField(TypeSpecifierNode* n) { return cloneTypeSpecifier(n); }
+
+    IfBranchStatementNode* cloneField(IfBranchStatementNode* n)
+    {
+        return static_cast<IfBranchStatementNode*>(cloneStatement(n));
+    }
+
+    SwitchSectionStatementNode* cloneField(SwitchSectionStatementNode* n)
+    {
+        return static_cast<SwitchSectionStatementNode*>(cloneStatement(n));
+    }
+
+    CallArgument cloneField(const CallArgument& arg)
+    {
+        return CallArgument{arg.mSourceRange, cloneField(arg.mValue), arg.mIsInOut};
+    }
+
+    FunctionTypeParameterSpecifier cloneField(const FunctionTypeParameterSpecifier& param)
+    {
+        return FunctionTypeParameterSpecifier{param.mSourceRange, cloneField(param.mTypeSpecifier), param.mIsInOut};
+    }
+
+    FieldInitializer* cloneField(FieldInitializer* field)
+    {
+        if (field == nullptr)
+        {
+            return nullptr;
+        }
+
+        return mAllocator.create<FieldInitializer>(field->mSourceRange,
+                                                   field->mIdentifierRange,
+                                                   field->mIdentifier,
+                                                   cloneField(field->mValue));
+    }
+
+    ImportSelectedEntry* cloneField(ImportSelectedEntry* entry)
+    {
+        if (entry == nullptr)
+        {
+            return nullptr;
+        }
+
+        return mAllocator.create<ImportSelectedEntry>(entry->mName, entry->mAlias);
     }
 
     ArenaAllocator& mAllocator;

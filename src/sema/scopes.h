@@ -48,9 +48,9 @@ public:
     Symbol* getSymbolRecursive(Identifier* id);
 
     Scope* getRootScope() const { return mRoot; }
+
     Scope* getCurrentScope() const { return mCurrent; }
     void setCurrentScope(Scope* scope) { mCurrent = scope; }
-    const std::vector<std::unique_ptr<Scope>>& scopes() const { return mScopes; }
 
 private:
     std::vector<std::unique_ptr<Scope>> mScopes;
