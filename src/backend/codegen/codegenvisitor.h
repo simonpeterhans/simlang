@@ -130,6 +130,8 @@ private:
 
     bool emitLoadFromLValue(ExpressionNode* expr);
     bool emitStoreIntoLValue(ExpressionNode* lhs, ExpressionNode* rhs);
+    void emitIndexedFieldLoad(IndexCallNode* index, FieldOffset offset, OpWordCount words);
+    void emitIndexedFieldStore(IndexCallNode* index, FieldOffset offset, OpWordCount words);
 
     // Opcode/type emission.
     void emitIntegerImmediate(i32 value);

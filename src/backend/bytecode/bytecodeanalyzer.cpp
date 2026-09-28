@@ -315,6 +315,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return replaceStackWords(height, 2, op.as.mLoadListElement.mSize);
         }
+        case OpCode::cLoadListElementField:
+        {
+            return replaceStackWords(height, 2, op.as.mLoadListElementField.mSize);
+        }
         case OpCode::cListPop:
         {
             return replaceStackWords(height, 1, op.as.mListPop.mSize);
@@ -340,9 +344,13 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return replaceStackWords(height, 2, 1);
         }
-        case OpCode::cMapGet:
+        case OpCode::cLoadMapValue:
         {
-            return replaceStackWords(height, 2, op.as.mMapGet.mSize);
+            return replaceStackWords(height, 2, op.as.mLoadMapValue.mSize);
+        }
+        case OpCode::cLoadMapValueField:
+        {
+            return replaceStackWords(height, 2, op.as.mLoadMapValueField.mSize);
         }
 
         case OpCode::cStoreLocal:
@@ -381,6 +389,10 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreListElement.mSize) + 2U);
         }
+        case OpCode::cStoreListElementField:
+        {
+            return popStackWords(height, static_cast<u32>(op.as.mStoreListElementField.mSize) + 2U);
+        }
         case OpCode::cListClear:
         case OpCode::cMapClear:
         {
@@ -400,9 +412,13 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return popStackWords(height, static_cast<u32>(op.as.mListInsert.mSize) + 2U);
         }
-        case OpCode::cMapSet:
+        case OpCode::cStoreMapValue:
         {
-            return popStackWords(height, static_cast<u32>(op.as.mMapSet.mSize) + 2U);
+            return popStackWords(height, static_cast<u32>(op.as.mStoreMapValue.mSize) + 2U);
+        }
+        case OpCode::cStoreMapValueField:
+        {
+            return popStackWords(height, static_cast<u32>(op.as.mStoreMapValueField.mSize) + 2U);
         }
 
         case OpCode::cSEQ:

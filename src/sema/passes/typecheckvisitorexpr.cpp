@@ -706,7 +706,7 @@ bool TypeCheckVisitor::visitIndexCall(IndexCallNode* node)
 
         node->mResolvedType = mapType->mValue;
 
-        // Map index expressions are assignable lvalues lowered through MapGet/MapSet.
+        // Map index expressions are assignable lvalues lowered through LoadMapValue/StoreMapValue.
         node->mFlags.set(cExprIsLValue, true);
         node->mFlags.set(cExprIsMutable, true);
 
@@ -979,10 +979,16 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         }
         else if (receiverType->mKind == TypeKind::cStruct)
         {
-            bool receiverIsAddressable = isAddressableExpression(node->mReceiver);
+            // Struct receivers are only allowed if they are non-temporary struct values.
+            // That means we want to allow stuff like:
+            // this.x = y ("this" access has already been rewritten to be explicit here)
+            // a[i].x = y;
+            // Thus, we either require the receiver to be an lvalue, or "this" (which is not an lvalue).
+            bool receiverHasStorage =
+                node->mReceiver->mNodeType == NodeType::cThis || node->mReceiver->mFlags.test(cExprIsLValue);
 
-            memberIsLValue = receiverIsAddressable;
-            receiverCanMutate = receiverIsAddressable && node->mReceiver->mFlags.test(cExprIsMutable);
+            memberIsLValue = receiverHasStorage;
+            receiverCanMutate = receiverHasStorage && node->mReceiver->mFlags.test(cExprIsMutable);
         }
 
         if (memberIsLValue)

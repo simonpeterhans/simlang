@@ -6,14 +6,12 @@ the idea that it would be cool to implement your own compiler and VM, SimLang tr
 performance).
 
 Since progress was quite good, I also ended up implementing some features that I do not think are needed for a minimal
-version of the language itself. This project was (and still is) also an experimental playground of sorts, so I kept most
-of them anyway, but it is not necessarily exactly the syntax and feature set of what I would ship in a real-world
-project (or keep in this implementation in the future).
+version of the language itself (in particular interfaces and generics). This project was (and still is) also an
+experimental playground of sorts, so I kept most of them anyway, but it is not necessarily exactly the syntax and
+feature set of what I would ship in a real-world project (or keep in this implementation in the future).
 
 ## Properties
 
-- Can easily compete with Lua, Wren, and basically any other scripting language in performance (except those compiling
-  to native code like LuaJIT or optimized Luau)
 - Statically typed (explicit and implicit)
 - Multi-pass compiler, explicit AST
 - Stack-based virtual machine and instruction set
@@ -36,9 +34,9 @@ project (or keep in this implementation in the future).
 
 ## Missing Features
 
-- Registering native types for VM use
+- Host-provided struct/class definitions
 - Enums
-- Null-safety when accessing members of nullable references (out of scope for now)
+- Null-safety (out of scope for now)
 - Debugger (bytecode patching would easily be possible, but in my opinion suitable debugging options are also depending
   on the embedding engine)
 - ...
@@ -79,11 +77,11 @@ class Terrain
     {
         var pos = make Vec2 { x, y };
         var tile = make Tile { pos, height: tileHeight };
-        this.tiles.add(tile);
+        tiles.add(tile);
 
-        if (tileHeight > this.peak)
+        if (tileHeight > peak)
         {
-            this.peak = tileHeight;
+            peak = tileHeight;
         }
     }
 

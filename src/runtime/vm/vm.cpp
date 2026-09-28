@@ -487,14 +487,7 @@ bool VM::readListElementWords(VMWord handle, u32 index, VMWord* dst, u32 wordCou
 
     // Get the element we're interested in and copy stuff out.
     VMWord* element = block.getElement(index);
-    if (wordCount == 1)
-    {
-        dst[0] = element[0];
-    }
-    else
-    {
-        copyWords(dst, element, wordCount);
-    }
+    copyWords(dst, element, wordCount);
 
     return true;
 }
@@ -515,14 +508,7 @@ bool VM::writeListElementWords(VMWord handle, u32 index, const VMWord* src, u32 
 
     // Get the element we're interested in and copy stuff in.
     VMWord* element = block.getElement(index);
-    if (wordCount == 1)
-    {
-        element[0] = src[0];
-    }
-    else
-    {
-        copyWords(element, src, wordCount);
-    }
+    copyWords(element, src, wordCount);
 
     return true;
 }
@@ -543,14 +529,7 @@ bool VM::pushListElementWords(VMWord handle, const VMWord* src, u32 wordCount)
 
     // Get the slot at the end of the list and copy stuff in.
     VMWord* element = block.getAppendSlot();
-    if (wordCount == 1)
-    {
-        element[0] = src[0];
-    }
-    else
-    {
-        copyWords(element, src, wordCount);
-    }
+    copyWords(element, src, wordCount);
 
     ++block.mHeader->mLength;
 
@@ -580,14 +559,7 @@ bool VM::insertListElementWords(VMWord handle, u32 index, const VMWord* src, u32
     VMWord* element = block.insertSlot(index);
 
     // Store the words.
-    if (wordCount == 1)
-    {
-        element[0] = src[0];
-    }
-    else
-    {
-        copyWords(element, src, wordCount);
-    }
+    copyWords(element, src, wordCount);
 
     return true;
 }
@@ -608,14 +580,7 @@ bool VM::removeListElementWords(VMWord handle, u32 index, VMWord* dst, u32 wordC
 
     // Store the words (since they will be overwritten as the element is removed).
     VMWord* element = block.getElement(index);
-    if (wordCount == 1)
-    {
-        dst[0] = element[0];
-    }
-    else
-    {
-        copyWords(dst, element, wordCount);
-    }
+    copyWords(dst, element, wordCount);
 
     block.removeSlot(index);
 
@@ -824,14 +789,7 @@ bool VM::readMapValueWords(VMWord handle, VMWord key, VMWord* dst, u32 wordCount
     }
 
     VMWord* value = block.getValue(index);
-    if (wordCount == 1)
-    {
-        dst[0] = value[0];
-    }
-    else
-    {
-        copyWords(dst, value, wordCount);
-    }
+    copyWords(dst, value, wordCount);
 
     return true;
 }
@@ -863,14 +821,7 @@ bool VM::writeMapValueWords(VMWord handle, VMWord key, const VMWord* src, u32 wo
     }
 
     VMWord* value = block.getValue(index);
-    if (wordCount == 1)
-    {
-        value[0] = src[0];
-    }
-    else
-    {
-        copyWords(value, src, wordCount);
-    }
+    copyWords(value, src, wordCount);
 
     return true;
 }
@@ -1377,6 +1328,30 @@ bool VM::run()
         }
 
         return block.getElement(static_cast<u32>(index));
+    };
+
+    auto resolveMapValuePayload = [&](VMWord map, VMWord key, VMAddress address) -> VMWord*
+    {
+        MapBlock block;
+        u32 hash = 0;
+        u32 index = 0;
+        bool found = false;
+        // Do the lookup for the map and key.
+        if (getCheckedMapBlock(map, block, address) == false ||
+            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            findMapEntry(block, key, hash, address, index, found) == false)
+        {
+            return nullptr;
+        }
+
+        // If we didn't find it, complain.
+        if (found == false)
+        {
+            reportRuntimeError(address, RuntimeErrorKind::cMissingMapKey);
+            return nullptr;
+        }
+
+        return block.getValue(index);
     };
 
     VM_DISPATCH_START();
@@ -2597,15 +2572,8 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        if (size == 1)
-        {
-            dst[0] = element[0];
-        }
-        else
-        {
-            // Copy the element words into the pushed words.
-            copyWords(dst, element, size);
-        }
+        // Copy the element words into the pushed words.
+        copyWords(dst, element, size);
 
         VM_END_OP();
     }
@@ -2630,15 +2598,61 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        if (size == 1)
+        // Copy the value words into the list element.
+        copyWords(element, src, size);
+
+        VM_END_OP();
+    }
+    VM_OP(LoadListElementField)
+    {
+        // Code:  LoadListElementField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [index, list, ...] -> [wordN-1, ..., word0, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The destination starts at the list word.
+        VMWord* dst = sp - 2;
+        // The list is the first consumed word.
+        VMWord list = dst[0];
+        // The index is right above the list.
+        i32 index = static_cast<i32>(dst[1]);
+        // Push N words.
+        sp = dst + size;
+
+        VMWord* element = resolveListElementPayload(list, index, getRuntimeErrorAddress(pc, code));
+        if (element == nullptr)
         {
-            element[0] = src[0];
+            std::memset(dst, 0, size * sizeof(VMWord));
+            VM_END_OP_CHECKED();
         }
-        else
+
+        copyWords(dst, element + fieldOffset, size);
+
+        VM_END_OP();
+    }
+    VM_OP(StoreListElementField)
+    {
+        // Code:  StoreListElementField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, index, list, ...] -> [...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The source starts at the first value word.
+        VMWord* src = sp - size;
+        // The list is right below the index.
+        VMWord list = src[-2];
+        // The index is right below the value words.
+        i32 index = static_cast<i32>(src[-1]);
+        // Pop the list, index, and N words.
+        sp = src - 2;
+
+        VMWord* element = resolveListElementPayload(list, index, getRuntimeErrorAddress(pc, code));
+        if (element == nullptr)
         {
-            // Copy the value words into the list element.
-            copyWords(element, src, size);
+            VM_END_OP_CHECKED();
         }
+
+        copyWords(element + fieldOffset, src, size);
 
         VM_END_OP();
     }
@@ -2700,15 +2714,8 @@ bool VM::run()
         }
 
         VMWord* element = block.getAppendSlot();
-        if (size == 1)
-        {
-            element[0] = src[0];
-        }
-        else
-        {
-            // Copy the value words into the new element.
-            copyWords(element, src, size);
-        }
+        // Copy the value words into the new element.
+        copyWords(element, src, size);
 
         // Grow the list length.
         ++block.mHeader->mLength;
@@ -2816,14 +2823,7 @@ bool VM::run()
 
         u32 lastIndex = block.mHeader->mLength - 1U;
         VMWord* element = block.getElement(lastIndex);
-        if (size == 1)
-        {
-            dst[0] = element[0];
-        }
-        else
-        {
-            copyWords(dst, element, size);
-        }
+        copyWords(dst, element, size);
 
         // The new size is the old last index.
         block.mHeader->mLength = lastIndex;
@@ -2860,15 +2860,8 @@ bool VM::run()
 
         u32 lastIndex = block.mHeader->mLength - 1U;
         VMWord* element = block.getElement(lastIndex);
-        if (size == 1)
-        {
-            dst[0] = element[0];
-        }
-        else
-        {
-            // Copy the last element words into the pushed words.
-            copyWords(dst, element, size);
-        }
+        // Copy the last element words into the pushed words.
+        copyWords(dst, element, size);
 
         VM_END_OP();
     }
@@ -2918,14 +2911,7 @@ bool VM::run()
         VMWord* element = block.insertSlot(insertIndex);
 
         // Copy the element in.
-        if (size == 1)
-        {
-            element[0] = src[0];
-        }
-        else
-        {
-            copyWords(element, src, size);
-        }
+        copyWords(element, src, size);
 
         // Pop the list, index, and N words.
         sp = src - 2;
@@ -2969,14 +2955,7 @@ bool VM::run()
         VMWord* element = block.getElement(removeIndex);
 
         // Copy the element to the stack.
-        if (size == 1)
-        {
-            dst[0] = element[0];
-        }
-        else
-        {
-            copyWords(dst, element, size);
-        }
+        copyWords(dst, element, size);
 
         block.removeSlot(removeIndex);
 
@@ -3175,9 +3154,9 @@ bool VM::run()
 
         VM_END_OP();
     }
-    VM_OP(MapGet)
+    VM_OP(LoadMapValue)
     {
-        // Code:  MapGet(size: OpWordCount)
+        // Code:  LoadMapValue(size: OpWordCount)
         // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
         OpWordCount size = readPC<OpWordCount>(pc);
 
@@ -3189,44 +3168,20 @@ bool VM::run()
         // Push N words.
         sp = dst + size;
 
-        // Look up the block from the map handle, and then try to find the key.
-        MapBlock block;
-        VMAddress address = getRuntimeErrorAddress(pc, code);
-        u32 hash = 0;
-        u32 index = 0;
-        bool found = false;
-        if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
-            findMapEntry(block, key, hash, address, index, found) == false)
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
         {
             std::memset(dst, 0, size * sizeof(VMWord));
             VM_END_OP_CHECKED();
         }
 
-        // If we couldn't find the key, this is an error.
-        if (found == false)
-        {
-            reportRuntimeError(address, RuntimeErrorKind::cMissingMapKey);
-            std::memset(dst, 0, size * sizeof(VMWord));
-            VM_END_OP_CHECKED();
-        }
-
-        // Otherwise, get the value from the bucket.
-        VMWord* value = block.getValue(index);
-        if (size == 1)
-        {
-            dst[0] = value[0];
-        }
-        else
-        {
-            copyWords(dst, value, size);
-        }
+        copyWords(dst, value, size);
 
         VM_END_OP();
     }
-    VM_OP(MapSet)
+    VM_OP(StoreMapValue)
     {
-        // Code:  MapSet(size: OpWordCount)
+        // Code:  StoreMapValue(size: OpWordCount)
         // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
         OpWordCount size = readPC<OpWordCount>(pc);
 
@@ -3271,17 +3226,61 @@ bool VM::run()
 
         // The destination is the entry value at the bucket.
         VMWord* dst = block.getValue(index);
-        if (size == 1)
-        {
-            dst[0] = src[0];
-        }
-        else
-        {
-            copyWords(dst, src, size);
-        }
+        copyWords(dst, src, size);
 
         //  Pop everything.
         sp = src - 2;
+
+        VM_END_OP();
+    }
+    VM_OP(LoadMapValueField)
+    {
+        // Code:  LoadMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The result goes where the map address currently is.
+        VMWord* dst = sp - 2;
+        // Get map and key.
+        VMWord map = dst[0];
+        VMWord key = dst[1];
+        // Push N words.
+        sp = dst + size;
+
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            std::memset(dst, 0, size * sizeof(VMWord));
+            VM_END_OP_CHECKED();
+        }
+
+        copyWords(dst, value + fieldOffset, size);
+
+        VM_END_OP();
+    }
+    VM_OP(StoreMapValueField)
+    {
+        // Code:  StoreMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The source starts at the first value word.
+        VMWord* src = sp - size;
+        // The key and the map are right below that.
+        VMWord key = src[-1];
+        VMWord map = src[-2];
+        sp = src - 2;
+
+        // Updating a field requires an existing value.
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            VM_END_OP_CHECKED();
+        }
+
+        copyWords(value + fieldOffset, src, size);
 
         VM_END_OP();
     }

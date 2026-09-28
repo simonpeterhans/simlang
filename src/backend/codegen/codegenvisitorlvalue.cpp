@@ -72,6 +72,60 @@ static FieldOffset getMemberFieldOffset(MemberAccessNode* member)
     return static_cast<FieldOffset>(layout->mFields[memberIndex].mOffset);
 }
 
+static IndexCallNode* findIndexedField(MemberAccessNode* member, FieldOffset& outOffset)
+{
+    // Handle stuff like a[i].b.c.d (e.g. for assignment).
+    // We start from a member access and consume member accesses until we get to an index access.
+    u32 offset = 0;
+    ExpressionNode* receiver = member;
+    while (receiver->mNodeType == NodeType::cMemberAccess)
+    {
+        auto* field = static_cast<MemberAccessNode*>(receiver);
+        // Only inline struct fields contribute to the offset within a collection element.
+        if (field->mReceiver->mResolvedType->mKind != TypeKind::cStruct)
+        {
+            return nullptr;
+        }
+
+        offset += getMemberFieldOffset(field);
+        receiver = field->mReceiver;
+    }
+
+    // Once we stop having chained member accesses, we expect an index call.
+    if (receiver->mNodeType != NodeType::cIndexCall)
+    {
+        return nullptr;
+    }
+
+    outOffset = static_cast<FieldOffset>(offset);
+
+    return static_cast<IndexCallNode*>(receiver);
+}
+
+void CodeGenVisitor::emitIndexedFieldLoad(IndexCallNode* index, FieldOffset offset, OpWordCount words)
+{
+    if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
+    {
+        emit<OpCode::cLoadMapValueField>(offset, words);
+    }
+    else
+    {
+        emit<OpCode::cLoadListElementField>(offset, words);
+    }
+}
+
+void CodeGenVisitor::emitIndexedFieldStore(IndexCallNode* index, FieldOffset offset, OpWordCount words)
+{
+    if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
+    {
+        emit<OpCode::cStoreMapValueField>(offset, words);
+    }
+    else
+    {
+        emit<OpCode::cStoreListElementField>(offset, words);
+    }
+}
+
 bool CodeGenVisitor::tryGetDirectPlace(ExpressionNode* expr, Place& out)
 {
     // Find out if we can directly emit into something without computing its address.
@@ -518,6 +572,23 @@ bool CodeGenVisitor::tryEmitFusedLoadFromLValue(ExpressionNode* expr)
 
             auto* member = static_cast<MemberAccessNode*>(expr);
 
+            // Handle stuff like x = a[i].b.c.d.
+            FieldOffset indexedOffset;
+            if (IndexCallNode* index = findIndexedField(member, indexedOffset))
+            {
+                // Emit the receiver and index.
+                if (visit(index->mReceiver) == false || visit(index->mIndex) == false)
+                {
+                    return false;
+                }
+
+                // Find out how many words we want to load and then do that.
+                auto words = static_cast<OpWordCount>(layout::getWordSizeForType(expr->mResolvedType));
+                emitIndexedFieldLoad(index, indexedOffset, words);
+
+                return true;
+            }
+
             // Get the receiver type and field offset.
             Type* receiverType = member->mReceiver->mResolvedType;
             FieldOffset fieldOffset = getMemberFieldOffset(member);
@@ -590,7 +661,7 @@ bool CodeGenVisitor::tryEmitFusedLoadFromLValue(ExpressionNode* expr)
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cMapGet>(static_cast<OpWordCount>(words));
+                emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(words));
             }
             else
             {
@@ -613,6 +684,23 @@ bool CodeGenVisitor::tryEmitFusedStoreIntoLValue(ExpressionNode* lhs, Expression
         case NodeType::cMemberAccess:
         {
             auto* member = static_cast<MemberAccessNode*>(lhs);
+
+            // Handle stuff like a[i].b.c.d = x.
+            FieldOffset indexedOffset;
+            if (IndexCallNode* index = findIndexedField(member, indexedOffset))
+            {
+                // Emit the receiver, index, and the rhs.
+                if (visit(index->mReceiver) == false || visit(index->mIndex) == false || visit(rhs) == false)
+                {
+                    return false;
+                }
+
+                // Find out how many words we want to store and then do that.
+                auto words = static_cast<OpWordCount>(layout::getWordSizeForType(lhs->mResolvedType));
+                emitIndexedFieldStore(index, indexedOffset, words);
+
+                return true;
+            }
 
             // Get the receiver type and field offset.
             Type* receiverType = member->mReceiver->mResolvedType;
@@ -674,7 +762,7 @@ bool CodeGenVisitor::tryEmitFusedStoreIntoLValue(ExpressionNode* lhs, Expression
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cMapSet>(static_cast<OpWordCount>(words));
+                emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(words));
             }
             else
             {
@@ -709,6 +797,35 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
         case NodeType::cMemberAccess:
         {
             auto* member = static_cast<MemberAccessNode*>(lhs);
+
+            // Handle stuff like a[i].b.c.d += x.
+            FieldOffset indexedOffset;
+            if (IndexCallNode* index = findIndexedField(member, indexedOffset))
+            {
+                // Emit the receiver and index.
+                if (visit(index->mReceiver) == false || visit(index->mIndex) == false)
+                {
+                    return false;
+                }
+
+                // Keep the evaluated handle and index/key for the store after the RHS has run.
+                // The list/map have their handle as well as the index/key on the stack, so copy that.
+                emit<OpCode::cDupN>(static_cast<OpWordCount>(2));
+                // Load the index.
+                emitIndexedFieldLoad(index, indexedOffset, 1);
+
+                // Resolve the rhs and emit the opcode.
+                if (visit(rhs) == false || emitCompoundAssignmentOpcode(op, typeKind) == false)
+                {
+                    return false;
+                }
+
+                // Do the field store.
+                // We only allow one word stuff here at the moment for compound, so do that.
+                emitIndexedFieldStore(index, indexedOffset, 1);
+
+                return true;
+            }
 
             // Get the receiver type and field offset.
             Type* receiverType = member->mReceiver->mResolvedType;
@@ -774,7 +891,7 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cMapGet>(static_cast<OpWordCount>(1));
+                emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(1));
             }
             else
             {
@@ -789,7 +906,7 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
 
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cMapSet>(static_cast<OpWordCount>(1));
+                emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(1));
             }
             else
             {

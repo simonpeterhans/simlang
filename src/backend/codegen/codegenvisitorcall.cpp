@@ -388,7 +388,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cMapGet>(static_cast<OpWordCount>(valueWords));
+        emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(valueWords));
         return true;
     }
 
@@ -400,7 +400,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cMapSet>(static_cast<OpWordCount>(valueWords));
+        emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(valueWords));
         return true;
     }
 
