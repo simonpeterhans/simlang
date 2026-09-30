@@ -2086,6 +2086,48 @@ bool VM::run()
         sp[-1] = offsetRefAddress(base, fieldOffset);
         VM_END_OP();
     }
+    VM_OP(RefListElement)
+    {
+        // Code:  RefListElement()
+        // Stack: [index, list, ...] -> [addr, ...]
+        i32 index = static_cast<i32>(*--sp);
+        VMWord listHandle = sp[-1];
+
+        // Get the element data address from the list.
+        VMWord* element = resolveListElementPayload(listHandle, index, getRuntimeErrorAddress(pc, code));
+        if (element == nullptr)
+        {
+            sp[-1] = cInvalidAddress;
+            VM_END_OP_CHECKED();
+        }
+
+        // Make the address and push it.
+        HeapIndex elementIndex = mHeap.indexOf(element);
+        sp[-1] = makeHeapAddress(elementIndex);
+
+        VM_END_OP();
+    }
+    VM_OP(RefMapValue)
+    {
+        // Code:  RefMapValue()
+        // Stack: [key, map, ...] -> [addr, ...]
+        VMWord key = *--sp;
+        VMWord map = sp[-1];
+
+        // Get the value data address from the map.
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            sp[-1] = cInvalidAddress;
+            VM_END_OP_CHECKED();
+        }
+
+        // Make the address and push it.
+        HeapIndex valueIndex = mHeap.indexOf(value);
+        sp[-1] = makeHeapAddress(valueIndex);
+
+        VM_END_OP();
+    }
     VM_OP(RefObjField)
     {
         // Code:  RefObjField(fieldOffset: FieldOffset)
@@ -2656,6 +2698,136 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(LoadMapValue)
+    {
+        // Code:  LoadMapValue(size: OpWordCount)
+        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The result goes where the map address currently is.
+        VMWord* dst = sp - 2;
+        // Get map and key.
+        VMWord map = dst[0];
+        VMWord key = dst[1];
+        // Push N words.
+        sp = dst + size;
+
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            std::memset(dst, 0, size * sizeof(VMWord));
+            VM_END_OP_CHECKED();
+        }
+
+        copyWords(dst, value, size);
+
+        VM_END_OP();
+    }
+    VM_OP(StoreMapValue)
+    {
+        // Code:  StoreMapValue(size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The source starts at the first value word.
+        VMWord* src = sp - size;
+        // The key and the map are right below that.
+        VMWord key = src[-1];
+        VMWord map = src[-2];
+
+        // Sync the stack since the map, key, and value words have to be live for GC.
+        STACK_SYNC();
+
+        // Look up the block from the map handle, and then get the entry.
+        MapBlock block;
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        u32 hash = 0;
+        u32 index = 0;
+        bool found = false;
+        if (getCheckedMapBlock(map, block, address) == false ||
+            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            findMapEntry(block, key, hash, address, index, found) == false)
+        {
+            sp = src - 2;
+            VM_END_OP_CHECKED();
+        }
+
+        // If we can't find the entry, we need to add a new one.
+        if (found == false)
+        {
+            // Grow the map if needed, which may reallocate a new block to the handle.
+            if (ensureMapCapacity(map, block, block.mHeader->mLength + 1U, address) == false ||
+                findMapEntry(block, key, hash, address, index, found) == false)
+            {
+                sp = src - 2;
+                VM_END_OP_CHECKED();
+            }
+
+            SIMLANG_ASSERTM(found == false && index < block.getBucketCapacity(),
+                            "Map insertion must find an empty bucket.");
+            block.insertEntry(index, hash, key);
+        }
+
+        // The destination is the entry value at the bucket.
+        VMWord* dst = block.getValue(index);
+        copyWords(dst, src, size);
+
+        //  Pop everything.
+        sp = src - 2;
+
+        VM_END_OP();
+    }
+    VM_OP(LoadMapValueField)
+    {
+        // Code:  LoadMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The result goes where the map address currently is.
+        VMWord* dst = sp - 2;
+        // Get map and key.
+        VMWord map = dst[0];
+        VMWord key = dst[1];
+        // Push N words.
+        sp = dst + size;
+
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            std::memset(dst, 0, size * sizeof(VMWord));
+            VM_END_OP_CHECKED();
+        }
+
+        copyWords(dst, value + fieldOffset, size);
+
+        VM_END_OP();
+    }
+    VM_OP(StoreMapValueField)
+    {
+        // Code:  StoreMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
+        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The source starts at the first value word.
+        VMWord* src = sp - size;
+        // The key and the map are right below that.
+        VMWord key = src[-1];
+        VMWord map = src[-2];
+        sp = src - 2;
+
+        // Updating a field requires an existing value.
+        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
+        if (value == nullptr)
+        {
+            VM_END_OP_CHECKED();
+        }
+
+        copyWords(value + fieldOffset, src, size);
+
+        VM_END_OP();
+    }
     VM_OP(ListSize)
     {
         // Code:  ListSize()
@@ -3151,136 +3323,6 @@ bool VM::run()
 
         // Pop the key (the map address was replaced with the result).
         sp = result + 1;
-
-        VM_END_OP();
-    }
-    VM_OP(LoadMapValue)
-    {
-        // Code:  LoadMapValue(size: OpWordCount)
-        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
-        OpWordCount size = readPC<OpWordCount>(pc);
-
-        // The result goes where the map address currently is.
-        VMWord* dst = sp - 2;
-        // Get map and key.
-        VMWord map = dst[0];
-        VMWord key = dst[1];
-        // Push N words.
-        sp = dst + size;
-
-        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
-        if (value == nullptr)
-        {
-            std::memset(dst, 0, size * sizeof(VMWord));
-            VM_END_OP_CHECKED();
-        }
-
-        copyWords(dst, value, size);
-
-        VM_END_OP();
-    }
-    VM_OP(StoreMapValue)
-    {
-        // Code:  StoreMapValue(size: OpWordCount)
-        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
-        OpWordCount size = readPC<OpWordCount>(pc);
-
-        // The source starts at the first value word.
-        VMWord* src = sp - size;
-        // The key and the map are right below that.
-        VMWord key = src[-1];
-        VMWord map = src[-2];
-
-        // Sync the stack since the map, key, and value words have to be live for GC.
-        STACK_SYNC();
-
-        // Look up the block from the map handle, and then get the entry.
-        MapBlock block;
-        VMAddress address = getRuntimeErrorAddress(pc, code);
-        u32 hash = 0;
-        u32 index = 0;
-        bool found = false;
-        if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
-            findMapEntry(block, key, hash, address, index, found) == false)
-        {
-            sp = src - 2;
-            VM_END_OP_CHECKED();
-        }
-
-        // If we can't find the entry, we need to add a new one.
-        if (found == false)
-        {
-            // Grow the map if needed, which may reallocate a new block to the handle.
-            if (ensureMapCapacity(map, block, block.mHeader->mLength + 1U, address) == false ||
-                findMapEntry(block, key, hash, address, index, found) == false)
-            {
-                sp = src - 2;
-                VM_END_OP_CHECKED();
-            }
-
-            SIMLANG_ASSERTM(found == false && index < block.getBucketCapacity(),
-                            "Map insertion must find an empty bucket.");
-            block.insertEntry(index, hash, key);
-        }
-
-        // The destination is the entry value at the bucket.
-        VMWord* dst = block.getValue(index);
-        copyWords(dst, src, size);
-
-        //  Pop everything.
-        sp = src - 2;
-
-        VM_END_OP();
-    }
-    VM_OP(LoadMapValueField)
-    {
-        // Code:  LoadMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
-        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
-        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
-        OpWordCount size = readPC<OpWordCount>(pc);
-
-        // The result goes where the map address currently is.
-        VMWord* dst = sp - 2;
-        // Get map and key.
-        VMWord map = dst[0];
-        VMWord key = dst[1];
-        // Push N words.
-        sp = dst + size;
-
-        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
-        if (value == nullptr)
-        {
-            std::memset(dst, 0, size * sizeof(VMWord));
-            VM_END_OP_CHECKED();
-        }
-
-        copyWords(dst, value + fieldOffset, size);
-
-        VM_END_OP();
-    }
-    VM_OP(StoreMapValueField)
-    {
-        // Code:  StoreMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
-        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
-        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
-        OpWordCount size = readPC<OpWordCount>(pc);
-
-        // The source starts at the first value word.
-        VMWord* src = sp - size;
-        // The key and the map are right below that.
-        VMWord key = src[-1];
-        VMWord map = src[-2];
-        sp = src - 2;
-
-        // Updating a field requires an existing value.
-        VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
-        if (value == nullptr)
-        {
-            VM_END_OP_CHECKED();
-        }
-
-        copyWords(value + fieldOffset, src, size);
 
         VM_END_OP();
     }

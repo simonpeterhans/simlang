@@ -148,8 +148,7 @@ bool CodeGenVisitor::emitMethodReceiver(MemberAccessNode* memberAccess)
     Type* receiverType = memberAccess->mReceiver->mResolvedType;
     if (receiverType->mKind == TypeKind::cStruct)
     {
-        // Allow this for temporaries (for stuff like makeStruct().f()).
-        return emitAddress(memberAccess->mReceiver, AddressMode::cReadOnly);
+        return emitStructReceiverAddress(memberAccess->mReceiver);
     }
 
     return visit(memberAccess->mReceiver);

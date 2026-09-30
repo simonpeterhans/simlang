@@ -116,6 +116,7 @@ private:
     bool emitInto(ExpressionNode* expr, const Place& dst);
     bool emitTemporaryAddress(ExpressionNode* expr);
     bool emitAddress(ExpressionNode* expr, AddressMode mode);
+    bool emitStructReceiverAddress(ExpressionNode* expr);
 
     const LambdaCapture* findCurrentCapture(Symbol* symbol) const;
     const LambdaCapture* findCurrentThisCapture() const;

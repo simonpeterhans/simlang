@@ -80,6 +80,7 @@ public:
 
     VMWord& wordAt(HeapIndex idx) { return mData[idx]; }
     const VMWord& wordAt(HeapIndex idx) const { return mData[idx]; }
+    HeapIndex indexOf(const VMWord* word) const { return static_cast<HeapIndex>(word - mData.data()); }
 
     void collect(const Roots& roots);
 

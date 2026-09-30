@@ -102,6 +102,51 @@ static IndexCallNode* findIndexedField(MemberAccessNode* member, FieldOffset& ou
     return static_cast<IndexCallNode*>(receiver);
 }
 
+bool CodeGenVisitor::emitStructReceiverAddress(ExpressionNode* expr)
+{
+    // Handle stuff like a[i].m();
+    FieldOffset offset = 0;
+    IndexCallNode* index = nullptr;
+    if (expr->mNodeType == NodeType::cIndexCall)
+    {
+        // If we're already at the index call, handle that.
+        index = static_cast<IndexCallNode*>(expr);
+    }
+    else if (expr->mNodeType == NodeType::cMemberAccess)
+    {
+        // If we have chained access, handle that first (recursively).
+        // We need to track the offset to understand where the field with the collection can be found.
+        index = findIndexedField(static_cast<MemberAccessNode*>(expr), offset);
+    }
+
+    // If we had no index call, we can directly emit the address.
+    if (index == nullptr)
+    {
+        return emitAddress(expr, AddressMode::cReadOnly);
+    }
+
+    // Otherwise, emit the receiver and index first.
+    if (visit(index->mReceiver) == false || visit(index->mIndex) == false)
+    {
+        return false;
+    }
+
+    // Emit the map or list reference.
+    if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
+    {
+        emit<OpCode::cRefMapValue>();
+    }
+    else
+    {
+        emit<OpCode::cRefListElement>();
+    }
+
+    // Emit the offset (if we have one).
+    emitFieldReference(offset);
+
+    return true;
+}
+
 void CodeGenVisitor::emitIndexedFieldLoad(IndexCallNode* index, FieldOffset offset, OpWordCount words)
 {
     if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
@@ -483,7 +528,8 @@ bool CodeGenVisitor::emitAddress(ExpressionNode* expr, AddressMode mode)
         }
         case NodeType::cIndexCall:
         {
-            // List elements are not addressable storage, but readonly uses can borrow a temporary snapshot.
+            // General indexed reads use a temporary snapshot; struct method receivers
+            // are handled separately by emitStructReceiverAddress.
             if (mode != AddressMode::cReadOnly)
             {
                 return false;

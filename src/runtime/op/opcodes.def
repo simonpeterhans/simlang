@@ -37,6 +37,8 @@ X( RefGlobal,             1,    GlobalIdx,        mGlobalIdx,   void,           
 X( RefField,              1,    FieldOffset,      mFieldOffset, void,            _2 )
 X( RefObjField,           1,    FieldOffset,      mFieldOffset, void,            _2 )
 X( RefCapture,            1,    FieldOffset,      mFieldOffset, void,            _2 )
+X( RefListElement,        0,    void,             _1,           void,            _2 )
+X( RefMapValue,           0,    void,             _1,           void,            _2 )
 
 X( LoadLocal,             1,    LocalIdx,         mLocalIdx,    void,            _2 )
 X( StoreLocal,            1,    LocalIdx,         mLocalIdx,    void,            _2 )
@@ -72,6 +74,11 @@ X( StoreListElement,      1,    OpWordCount,      mSize,        void,           
 X( LoadListElementField,  2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
 X( StoreListElementField, 2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
 
+X( LoadMapValue,          1,    OpWordCount,      mSize,        void,            _2 )
+X( StoreMapValue,         1,    OpWordCount,      mSize,        void,            _2 )
+X( LoadMapValueField,     2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
+X( StoreMapValueField,    2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
+
 X( ListSize,              0,    void,             _1,           void,            _2 )
 X( ListIsEmpty,           0,    void,             _1,           void,            _2 )
 X( ListPush,              1,    OpWordCount,      mSize,        void,            _2 )
@@ -89,10 +96,6 @@ X( MapSize,               0,    void,             _1,           void,           
 X( MapIsEmpty,            0,    void,             _1,           void,            _2 )
 X( MapClear,              0,    void,             _1,           void,            _2 )
 X( MapContainsKey,        0,    void,             _1,           void,            _2 )
-X( LoadMapValue,          1,    OpWordCount,      mSize,        void,            _2 )
-X( StoreMapValue,         1,    OpWordCount,      mSize,        void,            _2 )
-X( LoadMapValueField,     2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
-X( StoreMapValueField,    2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
 X( MapRemove,             0,    void,             _1,           void,            _2 )
 X( MapReserve,            0,    void,             _1,           void,            _2 )
 

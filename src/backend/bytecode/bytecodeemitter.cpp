@@ -51,6 +51,8 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cCallInterface:
         case OpCode::cFormatString:
         case OpCode::cRefObjField:
+        case OpCode::cRefListElement:
+        case OpCode::cRefMapValue:
         case OpCode::cLoadObjField:
         case OpCode::cLoadObjFieldN:
         case OpCode::cStoreObjField:
@@ -59,6 +61,10 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cStoreListElement:
         case OpCode::cLoadListElementField:
         case OpCode::cStoreListElementField:
+        case OpCode::cLoadMapValue:
+        case OpCode::cStoreMapValue:
+        case OpCode::cLoadMapValueField:
+        case OpCode::cStoreMapValueField:
         case OpCode::cListSize:
         case OpCode::cListIsEmpty:
         case OpCode::cListPush:
@@ -75,10 +81,6 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cMapIsEmpty:
         case OpCode::cMapClear:
         case OpCode::cMapContainsKey:
-        case OpCode::cLoadMapValue:
-        case OpCode::cStoreMapValue:
-        case OpCode::cLoadMapValueField:
-        case OpCode::cStoreMapValueField:
         case OpCode::cMapRemove:
         case OpCode::cMapReserve:
         case OpCode::cNewObject:
