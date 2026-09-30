@@ -607,11 +607,7 @@ TokenType Tokenizer::getIdentifierType() const
                 INNER_SWITCH_END
             INNER_SWITCH_END
         case 'd': return CHECK(1, "default", TokenType::cDefault);
-        case 'e':
-            INNER_SWITCH(1)
-            case 'l': return CHECK(2, "else", TokenType::cElse);
-            case 'x': return CHECK(2, "export", TokenType::cExport);
-            INNER_SWITCH_END
+        case 'e': return CHECK(1, "else", TokenType::cElse);
         case 'f':
             INNER_SWITCH(1)
             case 'a': return CHECK(2, "false", TokenType::cBoolFalse);

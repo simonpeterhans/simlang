@@ -16,7 +16,6 @@
 #include "symbol/identifier.h"
 #include "symbol/symbol.h"
 #include "symbol/symbolutils.h"
-#include "util/arrayview.h"
 #include "util/scoping.h"
 
 namespace simlang
@@ -74,8 +73,6 @@ bool ImportVisitor::visitImportDeclarationStatement(ImportDeclarationStatementNo
         return true;
     }
 
-    node->mResolvedModule = module;
-
     // Make sure the decls are collected since we might need them later here.
     bool callbackResult = (mProcessorCallback)(module, ModuleStage::cDeclsCollected);
     if (callbackResult == false)
@@ -83,69 +80,35 @@ bool ImportVisitor::visitImportDeclarationStatement(ImportDeclarationStatementNo
         return false;
     }
 
-    // Bind the export scope to the module symbol so qualified access uses only exported names.
-    module->mModuleSymbol->mScope = module->mExportScope;
-
-    // If we have an "as" name, use that. Otherwise, use the default local name.
-    // The module has to exist at this point and so mPath.back() should always be valid.
-    Identifier* asName = (node->mAlias != nullptr) ? node->mAlias : node->mPath.back();
-
-    // Always bind the module symbol so qualified access via the alias works.
-    // This means that if we do "import a as b", exported names from a are accessible via b::....
-    // When looking up scoped stuff like b::D, we get the module symbol (b in this example).
-    // Then, its export scope is used for the member lookup.
-    if (Symbol* previous = mCtx.mScopes.getSymbolRecursive(asName))
+    auto bindSymbol = [&](Symbol* symbol, Identifier* name)
     {
-        reportDuplicateSymbol(mCtx, node->mSourceRange, asName, previous);
+        if (Symbol* previous = mCtx.mScopes.getSymbolRecursive(name))
+        {
+            // This is allowed if we import the same thing more than once (for now?).
+            if (previous != symbol)
+            {
+                reportDuplicateSymbol(mCtx, node->mSourceRange, name, previous);
+            }
+
+            return;
+        }
+
+        // Add it to the scope.
+        mCtx.mScopes.addSymbol(symbol, name);
+    };
+
+    // If we import the entire thing as an alias, add the module symbol to the scope.
+    if (node->mAlias != nullptr)
+    {
+        bindSymbol(module->mModuleSymbol, node->mAlias);
         return true;
     }
 
-    mCtx.mScopes.addSymbol(module->mModuleSymbol, asName);
-
-    // If we import specific things, do that.
-    for (ImportSelectedEntry* ise : node->mSelected)
+    // If we have no alias, import the entire thing directly into the scope.
+    // Module symbols have all their top level declarations as members.
+    for (Symbol* symbol : module->mModuleSymbol->mMembers)
     {
-        // If we have that, use that, otherwise use the normal name.
-        Identifier* importedName = (ise->mAlias != nullptr) ? ise->mAlias : ise->mName;
-
-        Symbol* s = module->mExportScope->getSymbol(ise->mName);
-        if (s == nullptr)
-        {
-            // If we didn't find it in the export scope, do some additional diag.
-            // Perhaps it was private, so look that up.
-            Symbol* privateSymbol = nullptr;
-            if (module->mAST != nullptr && module->mAST->mScope != nullptr)
-            {
-                privateSymbol = module->mAST->mScope->getSymbol(ise->mName);
-            }
-
-            if (privateSymbol != nullptr)
-            {
-                // If it wasn't exported, add the diag and a note.
-                auto diag = mCtx.report<cImportedSymbolNotExported>(node->mSourceRange, ise->mName);
-                SourceRange symbolRange = getSymbolSourceRange(privateSymbol);
-                if (symbolRange.isValid())
-                {
-                    diag.note<cSymbolDeclaredHere>(symbolRange, ise->mName).hint<cAddExportSpecifierHint>(symbolRange);
-                }
-            }
-            else
-            {
-                // If it simply doesn't exist, complain.
-                mCtx.report<cImportedSymbolNotFound>(node->mSourceRange, ise->mName);
-            }
-            continue;
-        }
-
-        // If it already exists in our scope, complain as well.
-        if (Symbol* previous = mCtx.mScopes.getSymbolRecursive(importedName))
-        {
-            reportDuplicateSymbol(mCtx, node->mSourceRange, importedName, previous);
-            continue;
-        }
-
-        // Finally add it to our scope.
-        mCtx.mScopes.addSymbol(s, importedName);
+        bindSymbol(symbol, symbol->mIdentifier);
     }
 
     return true;

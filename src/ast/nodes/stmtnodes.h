@@ -19,12 +19,11 @@ struct TypeSpecifierNode;
 enum StmtNodeFlags : NodeFlagType
 {
     cStmtIsMutable = 1 << (cNodeFlagOffset + 0),
-    cStmtIsExported = 1 << (cNodeFlagOffset + 1),
-    cStmtIsPrivate = 1 << (cNodeFlagOffset + 2),
-    cStmtIsInterfaceImpl = 1 << (cNodeFlagOffset + 3),
-    cStmtIsTemplateInstance = 1 << (cNodeFlagOffset + 4),
+    cStmtIsPrivate = 1 << (cNodeFlagOffset + 1),
+    cStmtIsInterfaceImpl = 1 << (cNodeFlagOffset + 2),
+    cStmtIsTemplateInstance = 1 << (cNodeFlagOffset + 3),
 
-    cStmtFlagsOffset = cNodeFlagOffset + 5
+    cStmtFlagsOffset = cNodeFlagOffset + 4
 };
 
 struct StatementNode : ASTNode
@@ -187,40 +186,22 @@ struct TypeDeclarationStatementNode : StatementNode
     ModuleEntry* mDeclModule = nullptr;
 };
 
-struct ImportSelectedEntry
-{
-    explicit ImportSelectedEntry(Identifier* name, Identifier* alias)
-        : mName(name)
-        , mAlias(alias)
-    {
-    }
-
-    Identifier* mName;
-    Identifier* mAlias;
-};
-
 struct ImportDeclarationStatementNode : StatementNode
 {
     explicit ImportDeclarationStatementNode(SourceRange range,
                                             ArrayView<Identifier*> path,
-                                            ArrayView<ImportSelectedEntry*> selected,
                                             Identifier* alias,
                                             bool isRelative)
         : StatementNode(NodeType::cImportDeclarationStatement, range)
         , mIsRelative(isRelative)
         , mPath(path)
-        , mSelected(selected)
         , mAlias(alias)
     {
     }
 
     bool mIsRelative;
     ArrayView<Identifier*> mPath;
-    ArrayView<ImportSelectedEntry*> mSelected;
     Identifier* mAlias;
-
-    // Resolved module.
-    ModuleEntry* mResolvedModule = nullptr;
 };
 
 struct IfBranchStatementNode : StatementNode

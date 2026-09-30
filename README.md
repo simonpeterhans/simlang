@@ -46,8 +46,8 @@ feature set of what I would ship in a real-world project (or keep in this implem
 (The full reference will follow at a later point.)
 
 ```sim
-// Importing a specific symbol from a module.
-import math { Vec2 };
+// Import public declarations from math.
+import math;
 
 // Value-type struct.
 struct Tile

@@ -11,7 +11,6 @@ X( cInterfaceMethodDeclaredHere,          cNote,    "Interface method declared h
 
 // Hints.
 X( cHintMessage,                          cHint,    "Hint.",                                   "{}" )
-X( cAddExportSpecifierHint,               cHint,    "Export symbol.",                          "Add 'export' to the declaration if this symbol should be visible to imports." )
 X( cAddImplSpecifierHint,                 cHint,    "Add impl specifier.",                     "Add 'impl' to the method if it is intended to satisfy this interface method." )
 X( cClassFieldInitializationHint,         cHint,    "Initialize class fields.",                "Initialize missing class fields at the start of 'init', or give them declaration defaults." )
 
@@ -52,10 +51,8 @@ X( cCaseOutsideSwitch,                    cError,   "'case' outside switch.",   
 X( cDefaultOutsideSwitch,                 cError,   "'default' outside switch.",               "'default' labels can only appear inside a switch statement." )
 X( cInvalidDeclarationStart,              cError,   "Invalid declaration starter.",            "'{}' is not a valid declaration starter." )
 X( cDuplicateTemplateParameter,           cError,   "Duplicate template parameter.",           "Template parameter '{}' is already declared." )
-X( cDuplicateExportSpecifier,             cWarning, "Duplicate 'export' specifier.",           "'export' specified multiple times; duplicate ignored." )
-X( cExportOnNonTopLevel,                  cError,   "Invalid export.",                         "'export' is only allowed on top-level declarations." )
-X( cInvalidExportTarget,                  cError,   "Invalid export.",                         "'export' cannot be applied to '{}' declarations." )
 X( cDuplicatePrivateSpecifier,            cWarning, "Duplicate 'private' specifier.",          "'private' specified multiple times; duplicate ignored." )
+X( cInvalidPrivateTarget,                 cError,   "Invalid private declaration.",           "'private' cannot be applied to '{}' declarations." )
 X( cPrivateInterfaceMember,               cError,   "Invalid private member.",                 "Interface members cannot be private." )
 X( cDuplicateImplSpecifier,               cWarning, "Duplicate 'impl' specifier.",             "'impl' specified multiple times; duplicate ignored." )
 X( cInvalidImplTarget,                    cError,   "Invalid impl.",                           "'impl' can only be applied to class methods." )
@@ -65,8 +62,6 @@ X( cInvalidImplClause,                    cError,   "Invalid impl.",            
 X( cInvalidTypeDeclarationScope,          cError,   "Type declaration in invalid scope.",      "Struct or class '{}' must be declared on the top level." )
 X( cInvalidFunctionDeclarationScope,      cError,   "Function declaration in invalid scope.",  "Function '{}' must be declared as a method in a type or on the top level." )
 X( cSymbolAlreadyDefined,                 cError,   "Symbol already defined.",                 "Symbol '{}' is already defined in this scope." )
-X( cImportedSymbolNotFound,               cError,   "Imported symbol not found.",              "Module does not define symbol '{}'." )
-X( cImportedSymbolNotExported,            cError,   "Imported symbol is private.",             "Symbol '{}' is defined but not exported by the imported module." )
 X( cUndefinedIdentifier,                  cError,   "Undefined identifier.",                   "Identifier '{}' is not defined in this scope." )
 X( cThisOutsideMethod,                    cError,   "'this' outside method.",                  "Cannot use 'this' outside of a method context." )
 X( cInvalidFieldDefaultReference,         cError,   "Invalid field default.",                  "Default initializer for field '{}' cannot refer to instance member '{}'." )

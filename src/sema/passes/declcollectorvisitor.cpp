@@ -132,16 +132,7 @@ bool DeclCollectorVisitor::visitVariableDeclarationStatement(VariableDeclaration
     Symbol* symbol = mCtx.mSymbols.createSymbol(symbolType);
     symbol->mIdentifier = node->mIdentifier;
     symbol->mDeclNode = node;
-    if (isTypeMember)
-    {
-        // This is a member variable.
-        symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
-    }
-    else
-    {
-        // This is a global variable.
-        symbol->mFlags.set(SymbolFlags::cExport, node->mFlags.test(cStmtIsExported));
-    }
+    symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
 
     // The type may not be known yet at this time so we can't resolve it yet.
 
@@ -218,14 +209,10 @@ bool DeclCollectorVisitor::visitFunctionDeclarationStatement(FunctionDeclaration
     Symbol* symbol = mCtx.mSymbols.createSymbol(symbolType);
     symbol->mIdentifier = node->mIdentifier;
     symbol->mDeclNode = node;
+    symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
     if (isTypeMember)
     {
-        symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
         symbol->mFlags.set(SymbolFlags::cImpl, node->mFlags.test(cStmtIsInterfaceImpl));
-    }
-    else
-    {
-        symbol->mFlags.set(SymbolFlags::cExport, node->mFlags.test(cStmtIsExported));
     }
 
     // Set the symbol in the node.
@@ -294,7 +281,7 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
         symbol->mIdentifier = node->mIdentifier;
         symbol->mDeclNode = node;
         symbol->mScope = mCtx.mScopes.getCurrentScope();
-        symbol->mFlags.set(SymbolFlags::cExport, node->mFlags.test(cStmtIsExported));
+        symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
 
         node->mSymbol = symbol;
         node->mScope = symbol->mScope;
@@ -318,10 +305,7 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
     Symbol* symbol = mCtx.mSymbols.createSymbol(symbolType);
     symbol->mIdentifier = node->mIdentifier;
     symbol->mDeclNode = node;
-    if (isTemplateInstance == false)
-    {
-        symbol->mFlags.set(SymbolFlags::cExport, node->mFlags.test(cStmtIsExported));
-    }
+    symbol->mFlags.set(SymbolFlags::cPrivate, node->mFlags.test(cStmtIsPrivate));
     // We can also create the type since this is the declaring symbol.
     symbol->mType = node->isInterface() ? static_cast<Type*>(mCtx.mTypes.getOrAddInterfaceType(symbol))
                                         : static_cast<Type*>(mCtx.mTypes.getOrAddAggregateType(symbol));

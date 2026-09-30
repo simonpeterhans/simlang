@@ -19,12 +19,11 @@ enum class SymbolFlags : u8
 {
     cNone      = 0,
 
-    cExport    = 1 << 0,
-    cPrivate   = 1 << 1,
-    cImpl      = 1 << 2,
-    cMutable   = 1 << 3,
-    cInOut     = 1 << 4,
-    cConstExpr = 1 << 5,
+    cPrivate   = 1 << 0,
+    cImpl      = 1 << 1,
+    cMutable   = 1 << 2,
+    cInOut     = 1 << 3,
+    cConstExpr = 1 << 4,
 };
 // clang-format on
 

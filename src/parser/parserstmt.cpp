@@ -171,32 +171,19 @@ StatementNode* Parser::parseExpressionOrAssignment(bool consumeSemi)
     return mCtx.create<ExpressionStatementNode>(range, expr);
 }
 
-void Parser::parseExportSpecifiers(FlagSet<NodeFlagType>& flags)
+void Parser::parseTopLevelSpecifiers(FlagSet<NodeFlagType>& flags)
 {
-    while (true)
+    while (getCurrentTokenType() == TokenType::cPrivate)
     {
-        switch (getCurrentTokenType())
+        // Consume the "private".
+        Token specToken = consume();
+        if (flags.test(cStmtIsPrivate))
         {
-            case TokenType::cExport:
-            {
-                // Consume the "export".
-                Token specToken = consume();
-
-                if (flags.test(cStmtIsExported))
-                {
-                    // Duplicate export specifier.
-                    mCtx.report<cDuplicateExportSpecifier>(specToken.getRange());
-                }
-
-                flags.set(cStmtIsExported);
-                break;
-            }
-            default:
-            {
-                // If we have no more export specifiers, we're done.
-                return;
-            }
+            // Duplicate private specifier.
+            mCtx.report<cDuplicatePrivateSpecifier>(specToken.getRange());
         }
+
+        flags.set(cStmtIsPrivate);
     }
 }
 

@@ -31,6 +31,7 @@
 #include "source/sourcemanager.h"
 #include "source/sourcerange.h"
 #include "symbol/symbol.h"
+#include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
 #include "util/scoping.h"
@@ -192,9 +193,9 @@ bool FrontendDriver::doDeclarations(ModuleEntry* module)
         return phase.finish(false);
     }
 
-    // Build the export scope.
-    // This includes every top-level declaration marked with "export".
-    Scope* exportScope = mCtx.mScopes.createScope(nullptr);
+    // Build the public scope.
+    Scope* publicScope = mCtx.mScopes.createScope(nullptr);
+    std::vector<Symbol*> publicDeclarations;
     for (ASTNode* node : module->mAST->mNodes)
     {
         if (node == nullptr)
@@ -226,14 +227,15 @@ bool FrontendDriver::doDeclarations(ModuleEntry* module)
             }
         }
 
-        if (symbol != nullptr && symbol->mFlags.test(SymbolFlags::cExport))
+        if (symbol != nullptr && symbol->mFlags.test(SymbolFlags::cPrivate) == false)
         {
-            exportScope->addSymbol(symbol);
+            publicScope->addSymbol(symbol);
+            publicDeclarations.push_back(symbol);
         }
     }
 
-    module->mExportScope = exportScope;
-    module->mModuleSymbol->mScope = exportScope;
+    module->mModuleSymbol->mScope = publicScope;
+    module->mModuleSymbol->mMembers = makeArrayView(mCtx.mAllocator, publicDeclarations);
     module->mStage = ModuleStage::cDeclsCollected;
 
     return phase.finish(true);

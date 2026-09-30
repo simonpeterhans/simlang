@@ -282,6 +282,9 @@ bool TypeCheckVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNod
         return true;
     }
 
+    // Also import the declaring module here.
+    // This is relevant if we're instantiating a template, which means we have access to the private vars.
+    ScopedValueBinder moduleScope{mCurrentModule, node->mDeclModule};
     ScopedValueBinder cs{mCurrentTypeSymbol, node->mSymbol};
 
     // Resolve all interfaces we're implementing.

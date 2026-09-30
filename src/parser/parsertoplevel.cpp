@@ -110,29 +110,6 @@ bool Parser::parseTemplateParameterList(std::vector<Identifier*>& params)
     }
 }
 
-ImportSelectedEntry* Parser::parseImportSelectedEntry()
-{
-    Token entryToken = getCurrentToken();
-    if (expect(TokenType::cIdentifier, &entryToken, true) == false)
-    {
-        return nullptr;
-    }
-
-    Identifier* asAlias = nullptr;
-    if (tryConsume(TokenType::cAs))
-    {
-        Token aliasToken = getCurrentToken();
-        if (expect(TokenType::cIdentifier, &aliasToken, true) == false)
-        {
-            return nullptr;
-        }
-
-        asAlias = aliasToken.mIdentifier;
-    }
-
-    return mCtx.create<ImportSelectedEntry>(entryToken.mIdentifier, asAlias);
-}
-
 StatementNode* Parser::parseFunctionDeclaration()
 {
     Token keywordToken = consume();
@@ -440,13 +417,6 @@ StatementNode* Parser::parseTypeMember()
     FlagSet<NodeFlagType> memberFlags;
     parseMemberSpecifiers(memberFlags);
 
-    if (getCurrentTokenType() == TokenType::cExport)
-    {
-        mCtx.report<cExportOnNonTopLevel>(getCurrentTokenRange());
-        recover(ParseLevel::cMember, RecoveryMode::cMalformedStart);
-        return nullptr;
-    }
-
     if (mInInterface && memberFlags.test(cStmtIsPrivate))
     {
         mCtx.report<cPrivateInterfaceMember>(startToken.getRange());
@@ -559,59 +529,14 @@ StatementNode* Parser::parseImportDeclaration()
 
     std::vector<Identifier*> path;
     path.reserve(8);
-    std::vector<ImportSelectedEntry*> selected;
     Identifier* alias = nullptr;
-
-    auto buildNode = [&]()
-    {
-        ArrayView<Identifier*> pathView = makeArrayView(mCtx.mAllocator, path);
-        ArrayView<ImportSelectedEntry*> selectedView = makeArrayView(mCtx.mAllocator, selected);
-        return mCtx.create<ImportDeclarationStatementNode>(makeRangeToPrevious(importToken),
-                                                           pathView,
-                                                           selectedView,
-                                                           alias,
-                                                           isRelative);
-    };
 
     if (parseQualifiedName(path) == false)
     {
         return nullptr;
     }
 
-    if (tryConsume(TokenType::cLeftBrace))
-    {
-        while (check(TokenType::cRightBrace) == false)
-        {
-            if (selected.empty() == false)
-            {
-                if (tryConsume(TokenType::cComma))
-                {
-                    // Keep parsing.
-                }
-                else
-                {
-                    mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
-                                                  std::array{TokenType::cComma, TokenType::cRightBrace},
-                                                  getCurrentTokenText());
-                    return nullptr;
-                }
-            }
-
-            ImportSelectedEntry* entry = parseImportSelectedEntry();
-            if (entry == nullptr)
-            {
-                return nullptr;
-            }
-            selected.push_back(entry);
-        }
-
-        if (expect(TokenType::cRightBrace, nullptr, true) == false)
-        {
-            return nullptr;
-        }
-    }
-
-    if (selected.empty() && tryConsume(TokenType::cAs))
+    if (tryConsume(TokenType::cAs))
     {
         Token aliasToken = cErrorToken;
         if (expect(TokenType::cIdentifier, &aliasToken, true) == false)
@@ -627,28 +552,29 @@ StatementNode* Parser::parseImportDeclaration()
         return nullptr;
     }
 
-    return buildNode();
+    return mCtx.create<ImportDeclarationStatementNode>(makeRangeToPrevious(importToken),
+                                                       makeArrayView(mCtx.mAllocator, path),
+                                                       alias,
+                                                       isRelative);
 }
 
 StatementNode* Parser::parseTopLevelDeclaration()
 {
     Token startToken = getCurrentToken();
-    FlagSet<NodeFlagType> exportFlags;
-    parseExportSpecifiers(exportFlags);
+    FlagSet<NodeFlagType> declarationFlags;
+    parseTopLevelSpecifiers(declarationFlags);
 
     TokenType tt = getCurrentTokenType();
     StatementNode* result = nullptr;
-    bool canExport = true;
 
     switch (tt)
     {
         case TokenType::cImport:
         {
-            if (exportFlags.test(cStmtIsExported))
+            if (declarationFlags.test(cStmtIsPrivate))
             {
-                mCtx.report<cInvalidExportTarget>(startToken.getRange(), getCurrentTokenText());
+                mCtx.report<cInvalidPrivateTarget>(startToken.getRange(), getCurrentTokenText());
             }
-            canExport = false;
             result = parseImportDeclaration();
             break;
         }
@@ -677,9 +603,9 @@ StatementNode* Parser::parseTopLevelDeclaration()
         }
         default:
         {
-            if (exportFlags.test(cStmtIsExported))
+            if (declarationFlags.test(cStmtIsPrivate))
             {
-                mCtx.report<cInvalidExportTarget>(startToken.getRange(), getCurrentTokenText());
+                mCtx.report<cInvalidPrivateTarget>(startToken.getRange(), getCurrentTokenText());
             }
             else
             {
@@ -696,10 +622,10 @@ StatementNode* Parser::parseTopLevelDeclaration()
         return nullptr;
     }
 
-    if (exportFlags.test(cStmtIsExported) && canExport)
+    if (tt != TokenType::cImport && declarationFlags.bits() != 0)
     {
-        result->mFlags.add(exportFlags);
         result->mSourceRange = makeRange(startToken, result);
+        result->mFlags.add(declarationFlags);
     }
 
     return result;

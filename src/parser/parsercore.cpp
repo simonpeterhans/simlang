@@ -171,7 +171,7 @@ bool Parser::expectSemi()
         case TokenType::cInterface:
         case TokenType::cTemplate:
         case TokenType::cImport:
-        case TokenType::cExport:
+        case TokenType::cPrivate:
         {
             return true;
         }
@@ -219,7 +219,6 @@ bool Parser::expectSemi()
     {
         case TokenType::cImpl:
         case TokenType::cPrivate:
-        case TokenType::cExport:
         case TokenType::cFun:
         case TokenType::cVar:
         case TokenType::cConst:
@@ -259,14 +258,14 @@ bool Parser::expectSemi()
             // If we had a malformed start, try to recover on a lot of token types.
             if (mode == RecoveryMode::cMalformedStart)
             {
-                return tokenIsAnyOf(tt, {TokenType::cReturn,   TokenType::cIf,        TokenType::cElse,
-                                         TokenType::cSwitch,   TokenType::cCase,      TokenType::cDefault,
-                                         TokenType::cFor,      TokenType::cWhile,     TokenType::cBreak,
-                                         TokenType::cContinue, TokenType::cVar,       TokenType::cConst,
-                                         TokenType::cPrint,    TokenType::cImport,    TokenType::cExport,
-                                         TokenType::cPrivate,  TokenType::cFun,       TokenType::cStruct,
-                                         TokenType::cClass,    TokenType::cInterface, TokenType::cTemplate,
-                                         TokenType::cInOut,    TokenType::cAs,        TokenType::cImpl});
+                return tokenIsAnyOf(tt, {TokenType::cReturn,    TokenType::cIf,       TokenType::cElse,
+                                         TokenType::cSwitch,    TokenType::cCase,     TokenType::cDefault,
+                                         TokenType::cFor,       TokenType::cWhile,    TokenType::cBreak,
+                                         TokenType::cContinue,  TokenType::cVar,      TokenType::cConst,
+                                         TokenType::cPrint,     TokenType::cImport,   TokenType::cPrivate,
+                                         TokenType::cFun,       TokenType::cStruct,   TokenType::cClass,
+                                         TokenType::cInterface, TokenType::cTemplate, TokenType::cInOut,
+                                         TokenType::cAs,        TokenType::cImpl});
             }
 
             // If we failed in the middle of something, skip to the next statement.

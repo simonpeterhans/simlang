@@ -22,7 +22,6 @@ class Tokenizer;
 struct CallArgument;
 struct ExpressionNode;
 struct Identifier;
-struct ImportSelectedEntry;
 struct ParamNode;
 struct ParserContext;
 struct StatementNode;
@@ -153,7 +152,7 @@ private:
     ExpressionNode* parseExpression();
 
     AssignmentOp getAssignmentOp(TokenType tt) const;
-    void parseExportSpecifiers(FlagSet<NodeFlagType>& flags);
+    void parseTopLevelSpecifiers(FlagSet<NodeFlagType>& flags);
     void parseMemberSpecifiers(FlagSet<NodeFlagType>& flags);
 
     StatementNode* parseEmptyStatement();
@@ -176,7 +175,6 @@ private:
     bool parseQualifiedName(std::vector<Identifier*>& out);
     bool parseTemplateParameterList(std::vector<Identifier*>& params);
 
-    ImportSelectedEntry* parseImportSelectedEntry();
     ParamNode* parseFunctionParameter();
     StatementNode* parseFunctionDeclaration();
     StatementNode* parseInitializerDeclaration();

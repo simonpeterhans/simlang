@@ -146,7 +146,7 @@ bool ResolutionVisitor::visitLambda(LambdaNode* node)
 
 bool ResolutionVisitor::visitModuleAccess(ModuleAccessNode* node)
 {
-    // For module access, the RHS is resolved against the module export scope.
+    // For module access, the RHS is resolved against the module's scope.
     if (visit(node->mLeft) == false)
     {
         return false;

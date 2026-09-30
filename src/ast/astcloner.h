@@ -138,9 +138,7 @@ public:
 
     StatementNode* visitImportDeclarationStatement(ImportDeclarationStatementNode* n)
     {
-        auto* cloned = rebuild<ImportDeclarationStatementNode>(n, n->mPath, n->mSelected, n->mAlias, n->mIsRelative);
-        cloned->mResolvedModule = n->mResolvedModule;
-        return cloned;
+        return rebuild<ImportDeclarationStatementNode>(n, n->mPath, n->mAlias, n->mIsRelative);
     }
 
     StatementNode* visitIfBranchStatement(IfBranchStatementNode* n)
@@ -299,16 +297,6 @@ protected:
                                                    field->mIdentifierRange,
                                                    field->mIdentifier,
                                                    cloneField(field->mValue));
-    }
-
-    ImportSelectedEntry* cloneField(ImportSelectedEntry* entry)
-    {
-        if (entry == nullptr)
-        {
-            return nullptr;
-        }
-
-        return mAllocator.create<ImportSelectedEntry>(entry->mName, entry->mAlias);
     }
 
     ArenaAllocator& mAllocator;
