@@ -906,8 +906,9 @@ void Heap::scanBlockPrecise(HeapIndex base)
             return;
         }
 
-        // If we have strings as keys, we need to mark them.
-        bool markStringKeys = (header.mTypeID == cStringTypeID);
+        // If we have strings or classes as keys, we need to mark them.
+        const TypeLayout& keyLayout = mTypeLayoutTable->getLayout(header.mTypeID);
+        bool markReferenceKeys = (keyLayout.getKind() == TypeLayout::Kind::cReference);
         bool markReferenceValue = false;
         bool markStructValueRefs = false;
         TypeLayoutRefCount refCount = 0;
@@ -930,7 +931,7 @@ void Heap::scanBlockPrecise(HeapIndex base)
         }
 
         // If we have nothing to mark at all, bail.
-        if (markStringKeys == false && markReferenceValue == false && markStructValueRefs == false)
+        if (markReferenceKeys == false && markReferenceValue == false && markStructValueRefs == false)
         {
             return;
         }
@@ -939,8 +940,8 @@ void Heap::scanBlockPrecise(HeapIndex base)
         map.forEachOccupiedBucket(
             [&](u32 index, const VMWord* bucket)
             {
-                // If we have strings, mark the key (index 0 is the control, index 1 the key).
-                if (markStringKeys)
+                // If we have a reference, mark the key (index 0 is the control, index 1 the key).
+                if (markReferenceKeys)
                 {
                     markValue(bucket[1]);
                 }

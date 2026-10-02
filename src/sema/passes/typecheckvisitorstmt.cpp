@@ -76,7 +76,19 @@ static bool isSupportedListElementType(Type* type)
 
 static bool isSupportedMapKeyType(Type* type)
 {
-    if (type == nullptr || type->mKind != TypeKind::cPrimitive)
+    if (type == nullptr)
+    {
+        return false;
+    }
+
+    // Allow class keys.
+    if (type->mKind == TypeKind::cClass)
+    {
+        return true;
+    }
+
+    // Primitives are also allowed (but not void).
+    if (type->mKind != TypeKind::cPrimitive)
     {
         return false;
     }

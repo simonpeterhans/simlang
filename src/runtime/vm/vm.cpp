@@ -667,7 +667,7 @@ bool VM::hashMapKey(TypeID keyTypeID, VMWord key, VMAddress address, u32& outHas
         return true;
     }
 
-    // Bools and ints are hashed normally.
+    // Int, bool, and class comparison goes through the value.
     outHash = mixHash32(key) & cMapHashMask;
 
     return true;
@@ -690,8 +690,8 @@ bool VM::mapKeysEqual(TypeID keyTypeID, VMWord lhs, VMWord rhs, VMAddress addres
         return true;
     }
 
-    // For everything else (int and bool) compare directly.
-    out = lhs == rhs;
+    // Int, bool, and class comparison goes through the value.
+    out = (lhs == rhs);
 
     return true;
 }
