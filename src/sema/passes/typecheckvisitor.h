@@ -47,6 +47,7 @@ public:
 
     bool visitAssignmentStatement(AssignmentStatementNode* node);
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
     bool visitIfBranchStatement(IfBranchStatementNode* node);
@@ -63,6 +64,7 @@ public:
 
     bool visitNamedTypeSpecifier(NamedTypeSpecifierNode* node);
     bool visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node);
+    bool visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* node);
 
 private:
     // Type state.

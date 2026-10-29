@@ -120,6 +120,12 @@ bool ConstFoldVisitor::visitExpressionStatement(ExpressionStatementNode* node)
     return true;
 }
 
+bool ConstFoldVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    foldExpr(node->mInit);
+    return true;
+}
+
 bool ConstFoldVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     foldExpr(node->mInit);
@@ -183,7 +189,10 @@ bool ConstFoldVisitor::visitWhileStatement(WhileStatementNode* node)
 
 bool ConstFoldVisitor::visitReturnStatement(ReturnStatementNode* node)
 {
-    foldExpr(node->mExpression);
+    for (ExpressionNode*& expr : node->mExpressions)
+    {
+        foldExpr(expr);
+    }
     return true;
 }
 

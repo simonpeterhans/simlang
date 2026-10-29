@@ -155,6 +155,42 @@ bool CodeGenVisitor::visitAssignmentStatement(AssignmentStatementNode* node)
     return emitCompoundAssignment(node);
 }
 
+bool CodeGenVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    // Emit the initializer.
+    if (visit(node->mInit) == false)
+    {
+        return false;
+    }
+
+    // Do the assignment in reverse order, since the top of the stack will be the "last" declaration.
+    const auto& types = static_cast<MultiReturnType*>(node->mInit->mResolvedType)->mTypes;
+    for (usize i = node->mBindings.size(); i > 0; --i)
+    {
+        if (auto* binding = node->mBindings[i - 1])
+        {
+            // If we have a (local) variable, make that place and emit the store.
+            Place place = Place::makeLocalPlace(types[i - 1], static_cast<LocalIdx>(binding->mSymbol->mIndex));
+            emitStoreToPlace(place);
+        }
+        else
+        {
+            // If we have '_', pop the result.
+            u32 words = layout::getWordSizeForType(types[i - 1]);
+            if (words == 1)
+            {
+                emit<OpCode::cPop>();
+            }
+            else if (words > 1)
+            {
+                emit<OpCode::cPopN>(static_cast<OpWordCount>(words));
+            }
+        }
+    }
+
+    return true;
+}
+
 bool CodeGenVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     // Globals are handled in the const data layout visitor.
@@ -518,18 +554,14 @@ bool CodeGenVisitor::visitSwitchStatement(SwitchStatementNode* node)
 
 bool CodeGenVisitor::visitReturnStatement(ReturnStatementNode* node)
 {
-    // If we have a return value, we need to push it on the stack.
-    if (node->mExpression)
+    for (ExpressionNode* expr : node->mExpressions)
     {
-        if (visit(node->mExpression) == false)
+        if (visit(expr) == false)
         {
             return false;
         }
     }
-
-    // Emit the return opcode.
     emit<OpCode::cReturn>();
-
     return true;
 }
 

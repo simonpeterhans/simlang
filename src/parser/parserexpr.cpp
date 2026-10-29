@@ -273,7 +273,7 @@ ExpressionNode* Parser::parseLambda()
     }
 
     // Parse the return type.
-    TypeSpecifierNode* returnTypeSpec = parseTypeSpec();
+    TypeSpecifierNode* returnTypeSpec = parseReturnTypeSpec();
     if (returnTypeSpec == nullptr)
     {
         return nullptr;

@@ -112,6 +112,11 @@ public:
                                                          n->mInit);
     }
 
+    StatementNode* visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* n)
+    {
+        return rebuild<MultiVariableDeclarationStatementNode>(n, n->mBindings, n->mInit);
+    }
+
     StatementNode* visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* n)
     {
         return rebuild<FunctionDeclarationStatementNode>(n,
@@ -173,7 +178,7 @@ public:
 
     StatementNode* visitReturnStatement(ReturnStatementNode* n)
     {
-        return rebuild<ReturnStatementNode>(n, n->mExpression);
+        return rebuild<ReturnStatementNode>(n, n->mExpressions);
     }
 
     StatementNode* visitBreakStatement(BreakStatementNode* n) { return rebuild<BreakStatementNode>(n); }
@@ -201,6 +206,11 @@ public:
     TypeSpecifierNode* visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* n)
     {
         return rebuild<FunctionTypeSpecifierNode>(n, n->mParams, n->mReturnTypeSpecifier);
+    }
+
+    TypeSpecifierNode* visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* n)
+    {
+        return rebuild<MultiReturnTypeSpecifierNode>(n, n->mTypes);
     }
 
     TypeSpecifierNode* visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* n)
@@ -265,6 +275,11 @@ protected:
     StatementNode* cloneField(StatementNode* n) { return cloneStatement(n); }
     ParamNode* cloneField(ParamNode* n) { return cloneParam(n); }
     TypeSpecifierNode* cloneField(TypeSpecifierNode* n) { return cloneTypeSpecifier(n); }
+
+    VariableDeclarationStatementNode* cloneField(VariableDeclarationStatementNode* n)
+    {
+        return static_cast<VariableDeclarationStatementNode*>(cloneStatement(n));
+    }
 
     IfBranchStatementNode* cloneField(IfBranchStatementNode* n)
     {

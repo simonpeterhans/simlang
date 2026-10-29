@@ -25,6 +25,7 @@ public:
     bool visitBlockStatement(BlockStatementNode* node);
     bool visitForStatement(ForStatementNode* node);
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
 
@@ -32,6 +33,7 @@ public:
 
     bool visitNamedTypeSpecifier(NamedTypeSpecifierNode* node);
     bool visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* node);
+    bool visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* node);
     bool visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode* node);
 
     bool visitTranslationUnit(TranslationUnitNode* node);

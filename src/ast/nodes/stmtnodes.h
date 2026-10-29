@@ -108,6 +108,22 @@ struct VariableDeclarationStatementNode : StatementNode
     Symbol* mSymbol = nullptr;
 };
 
+struct MultiVariableDeclarationStatementNode : StatementNode
+{
+    explicit MultiVariableDeclarationStatementNode(SourceRange range,
+                                                   ArrayView<VariableDeclarationStatementNode*> bindings,
+                                                   ExpressionNode* init)
+        : StatementNode(NodeType::cMultiVariableDeclarationStatement, range)
+        , mBindings(bindings)
+        , mInit(init)
+    {
+    }
+
+    // A null binding discards that result.
+    ArrayView<VariableDeclarationStatementNode*> mBindings;
+    ExpressionNode* mInit;
+};
+
 struct FunctionDeclarationStatementNode : StatementNode
 {
     explicit FunctionDeclarationStatementNode(SourceRange range,
@@ -301,14 +317,14 @@ struct ForStatementNode : StatementNode
 
 struct ReturnStatementNode : StatementNode
 {
-    explicit ReturnStatementNode(SourceRange range, ExpressionNode* expression)
+    explicit ReturnStatementNode(SourceRange range, ArrayView<ExpressionNode*> expressions)
         : StatementNode(NodeType::cReturnStatement, range)
-        , mExpression(expression)
+        , mExpressions(expressions)
 
     {
     }
 
-    ExpressionNode* mExpression;
+    ArrayView<ExpressionNode*> mExpressions;
 };
 
 struct BreakStatementNode : StatementNode

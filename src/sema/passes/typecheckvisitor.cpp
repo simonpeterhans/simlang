@@ -90,8 +90,8 @@ Type* TypeCheckVisitor::requireValueType(Type* type, SourceRange range, const ch
         return getErrorType();
     }
 
-    // If this is a void type, we report an error here.
-    if (getPrimitiveKind(type) == PrimitiveTypeKind::cVoid)
+    // Void and result lists cannot be used as ordinary values.
+    if (getPrimitiveKind(type) == PrimitiveTypeKind::cVoid || type->mKind == TypeKind::cMultiReturn)
     {
         mCtx.report<cInvalidTypeInContext>(range, typeToString(type), context);
         return getErrorType();

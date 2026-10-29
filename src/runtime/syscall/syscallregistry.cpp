@@ -16,11 +16,6 @@
 namespace simlang
 {
 
-static u32 getSyscallStackWords(SyscallRegistry::SyscallType type)
-{
-    return type.mType == NativeType::cVoid ? 0U : 1U;
-}
-
 Type* SyscallRegistry::getSyscallType(CompilerContext& ctx, SyscallType type)
 {
     switch (type.mType)
@@ -79,16 +74,39 @@ bool SyscallRegistry::registerSyscall(CompilerContext& ctx,
     // We have a new function, look up the type and create it if it doesn't exist yet.
     TypeTable& tt = ctx.mTypes;
 
-    Type* returnType = getSyscallType(ctx, templateData.mReturnType);
-    if (returnType == nullptr)
+    // Native values are one-word primitives or handles, void has no result entry.
+    std::vector<Type*> returnTypes;
+    usize returnWords = templateData.mReturnTypes.size();
+
+    // Convert the return type(s) from native to primitive type so we can register the signature later.
+    for (const SyscallType& rt : templateData.mReturnTypes)
     {
+        returnTypes.push_back(getSyscallType(ctx, rt));
+    }
+
+    // Make sure we don't return too much stuff.
+    if (returnWords > cMaxReturnWords)
+    {
+        ctx.report<cFunctionFrameTooLarge>(cInvalidSourceRange, returnWords, "return", cMaxReturnWords);
         return false;
     }
 
-    std::vector<FunctionParam> paramTypes;
-    paramTypes.reserve(templateData.mParamTypes.size());
+    Type* returnType = tt.getPrimitiveType(PrimitiveTypeKind::cVoid);
+    if (returnTypes.size() == 1)
+    {
+        returnType = returnTypes.front();
+    }
+    else if (returnTypes.size() > 1)
+    {
+        // If we have a multi return, get that (or create it) from the type table.
+        returnType = tt.getOrAddMultiReturn(returnTypes);
+    }
 
-    u32 argWords = 0;
+    // Convert from native to primitive type for the args as well.
+    usize argWords = templateData.mParamTypes.size();
+    std::vector<FunctionParam> paramTypes;
+    paramTypes.reserve(argWords);
+
     for (const SyscallType& pt : templateData.mParamTypes)
     {
         Type* paramType = getSyscallType(ctx, pt);
@@ -97,11 +115,8 @@ bool SyscallRegistry::registerSyscall(CompilerContext& ctx,
             return false;
         }
 
-        argWords += getSyscallStackWords(pt);
         paramTypes.push_back(FunctionParam{paramType, false});
     }
-
-    u32 returnWords = getSyscallStackWords(templateData.mReturnType);
 
     FunctionType* functionType = tt.getOrAddFunction(returnType, paramTypes);
 

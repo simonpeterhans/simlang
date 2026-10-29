@@ -105,6 +105,12 @@ bool ImplicitThisVisitor::visitExpressionStatement(ExpressionStatementNode* node
     return true;
 }
 
+bool ImplicitThisVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    checkExpression(node->mInit);
+    return true;
+}
+
 bool ImplicitThisVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     checkExpression(node->mInit);
@@ -200,7 +206,10 @@ bool ImplicitThisVisitor::visitSwitchStatement(SwitchStatementNode* node)
 
 bool ImplicitThisVisitor::visitReturnStatement(ReturnStatementNode* node)
 {
-    checkExpression(node->mExpression);
+    for (ExpressionNode*& expr : node->mExpressions)
+    {
+        checkExpression(expr);
+    }
     return true;
 }
 

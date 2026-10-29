@@ -74,6 +74,10 @@ X( cTemplateInstanceNameTooLong,          cError,   "Template instance name too 
 X( cCircularTypeDependency,               cError,   "Circular type dependency.",               "Type resolution for '{}' would create a circular dependency." )
 X( cVariableUsedInOwnInitializer,         cError,   "Invalid variable self-reference.",        "Variable '{}' cannot be used in its own initializer." )
 
+X( cMultipleResultsRequired,              cError,   "Multiple results required.",              "A result or binding list requires at least two entries." )
+X( cInvalidMultiVariableDeclarationScope, cError,   "Invalid multiple variable declaration.",  "Multiple variable declarations are restricted to local variables." )
+X( cResultCountMismatch,                  cError,   "Result count mismatch.",                  "Expected {} result(s) but got {}." )
+
 // Type checking.
 X( cTypeMismatch,                         cError,   "Type mismatch.",                          "Expected type '{}' but got '{}'." )
 X( cCannotInferType,                      cError,   "Cannot infer type.",                      "Cannot infer type for variable '{}'. Provide an explicit type or an initializer with a concrete type." )

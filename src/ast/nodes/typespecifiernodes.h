@@ -59,6 +59,17 @@ struct FunctionTypeSpecifierNode : TypeSpecifierNode
     TypeSpecifierNode* mReturnTypeSpecifier;
 };
 
+struct MultiReturnTypeSpecifierNode : TypeSpecifierNode
+{
+    explicit MultiReturnTypeSpecifierNode(SourceRange range, ArrayView<TypeSpecifierNode*> types)
+        : TypeSpecifierNode(NodeType::cMultiReturnTypeSpecifier, range)
+        , mTypes(types)
+    {
+    }
+
+    ArrayView<TypeSpecifierNode*> mTypes;
+};
+
 struct SubstitutedTypeSpecifierNode : TypeSpecifierNode
 {
     explicit SubstitutedTypeSpecifierNode(SourceRange range, Type* type)

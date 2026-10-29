@@ -45,6 +45,21 @@ FunctionInfo& SymbolLayoutVisitor::getCurrentFunction()
     return mCtx.mBackend.mFunctionInfos[mCurrentFunction];
 }
 
+bool SymbolLayoutVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    // Resolve all the variable decl bindings we have.
+    for (VariableDeclarationStatementNode* binding : node->mBindings)
+    {
+        if (visit(binding) == false)
+        {
+            return false;
+        }
+    }
+
+    // Also resolve the initializer.
+    return visit(node->mInit);
+}
+
 bool SymbolLayoutVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     if (node->mSymbol->mSymbolType == SymbolType::cMemberVariable)
@@ -141,8 +156,14 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
         return false;
     }
 
+    // Set the return words in the current function.
     auto* ft = static_cast<FunctionType*>(node->mSymbol->mType);
     u32 retWords = layout::getWordSizeForType(ft->mReturnType);
+    if (retWords > cMaxReturnWords)
+    {
+        mCtx.report<cFunctionFrameTooLarge>(node->mSourceRange, retWords, "return", cMaxReturnWords);
+        return false;
+    }
     getCurrentFunction().mReturnWords = static_cast<ReturnWordCount>(retWords);
 
     // If this is main, validate that and track the index.
@@ -236,9 +257,14 @@ bool SymbolLayoutVisitor::visitLambda(LambdaNode* node)
         return false;
     }
 
+    // Set the return words in the current function.
     auto* functionType = static_cast<FunctionType*>(node->mSymbol->mType);
     u32 returnWords = layout::getWordSizeForType(functionType->mReturnType);
-    // Set the return words in the current function.
+    if (returnWords > cMaxReturnWords)
+    {
+        mCtx.report<cFunctionFrameTooLarge>(node->mSourceRange, returnWords, "return", cMaxReturnWords);
+        return false;
+    }
     getCurrentFunction().mReturnWords = static_cast<ReturnWordCount>(returnWords);
 
     return true;

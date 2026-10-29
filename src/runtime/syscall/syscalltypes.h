@@ -3,6 +3,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -16,6 +17,16 @@
 
 namespace simlang
 {
+
+template <typename T>
+struct IsSyscallTuple : std::false_type
+{
+};
+
+template <typename... Ts>
+struct IsSyscallTuple<std::tuple<Ts...>> : std::true_type
+{
+};
 
 template <typename T>
 struct SyscallValue

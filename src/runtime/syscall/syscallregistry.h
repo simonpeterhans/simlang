@@ -2,6 +2,7 @@
 
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "runtime/syscall/nativetype.h"
@@ -31,7 +32,7 @@ public:
 
     struct SyscallTemplate
     {
-        SyscallType mReturnType;
+        std::vector<SyscallType> mReturnTypes;
         std::vector<SyscallType> mParamTypes;
         void* mFunction = nullptr;
         bool (*mCaller)(VM& vm, const SyscallEntry& entry) = nullptr;
@@ -42,7 +43,7 @@ public:
     {
         SyscallTemplate tmp;
 
-        tmp.mReturnType = getSyscallType<R>();
+        tmp.mReturnTypes = getReturnTypes<R>();
         (tmp.mParamTypes.push_back(getSyscallType<Args>()), ...);
         tmp.mFunction = reinterpret_cast<void*>(func);
         tmp.mCaller = &Syscaller<R, Args...>::call;
@@ -59,6 +60,37 @@ public:
 
 private:
     static Type* getSyscallType(CompilerContext& ctx, SyscallType type);
+
+    template <typename Tuple, std::size_t... I>
+    static std::vector<SyscallType> getTupleReturnTypes(std::index_sequence<I...>)
+    {
+        static_assert(((std::is_reference_v<std::tuple_element_t<I, Tuple>> == false) && ...),
+                      "Syscall result components must be returned by value.");
+
+        return {getSyscallType<std::tuple_element_t<I, Tuple>>()...};
+    }
+
+    template <typename R>
+    static std::vector<SyscallType> getReturnTypes()
+    {
+        static_assert(std::is_reference_v<R> == false, "Syscall results must be returned by value.");
+        using U = RemoveCVRefT<R>;
+
+        if constexpr (std::is_void_v<U>)
+        {
+            return {};
+        }
+        else if constexpr (IsSyscallTuple<U>::value)
+        {
+            static_assert(std::tuple_size_v<U> >= 2, "Multiple syscall results require at least two components.");
+
+            return getTupleReturnTypes<U>(std::make_index_sequence<std::tuple_size_v<U>>{});
+        }
+        else
+        {
+            return {getSyscallType<R>()};
+        }
+    }
 
     template <typename T>
     static constexpr SyscallType getSyscallType()

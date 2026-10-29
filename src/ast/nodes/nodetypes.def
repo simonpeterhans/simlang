@@ -25,6 +25,7 @@ X( BlockStatement )
 X( ExpressionStatement )
 X( AssignmentStatement )
 X( VariableDeclarationStatement )
+X( MultiVariableDeclarationStatement )
 X( FunctionDeclarationStatement )
 X( TypeDeclarationStatement )
 X( ImportDeclarationStatement )
@@ -45,6 +46,7 @@ X( ParamDeclaration )
 // Type specifiers.
 X( NamedTypeSpecifier )
 X( FunctionTypeSpecifier )
+X( MultiReturnTypeSpecifier )
 X( SubstitutedTypeSpecifier )
 
 // Misc.

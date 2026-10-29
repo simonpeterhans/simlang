@@ -99,6 +99,19 @@ bool DeclCollectorVisitor::visitForStatement(ForStatementNode* node)
     return true;
 }
 
+bool DeclCollectorVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    // We reject multi-variable declarations inside of structs or classes.
+    if (mCurrentSymbol == nullptr || mCurrentSymbol->mSymbolType == SymbolType::cStruct ||
+        mCurrentSymbol->mSymbolType == SymbolType::cClass)
+    {
+        mCtx.report<cInvalidMultiVariableDeclarationScope>(node->mSourceRange);
+        return true;
+    }
+
+    return visit(node->mInit);
+}
+
 bool DeclCollectorVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     SymbolType symbolType;

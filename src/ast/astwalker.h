@@ -133,6 +133,11 @@ public:
 
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* n) { return this->visit(n->mInit); }
 
+    bool visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* n)
+    {
+        return this->visit(n->mInit);
+    }
+
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* n)
     {
         for (auto* p : n->mParams)
@@ -168,7 +173,17 @@ public:
 
     bool visitAssignmentStatement(AssignmentStatementNode* n) { return this->visit(n->mLHS) && this->visit(n->mRHS); }
 
-    bool visitReturnStatement(ReturnStatementNode* n) { return this->visit(n->mExpression); }
+    bool visitReturnStatement(ReturnStatementNode* n)
+    {
+        for (ExpressionNode* expr : n->mExpressions)
+        {
+            if (this->visit(expr) == false)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     bool visitWhileStatement(WhileStatementNode* n) { return this->visit(n->mCondition) && this->visit(n->mBody); }
 
@@ -259,6 +274,18 @@ public:
         }
 
         return this->visit(n->mReturnTypeSpecifier);
+    }
+
+    bool visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* n)
+    {
+        for (TypeSpecifierNode* type : n->mTypes)
+        {
+            if (this->visit(type) == false)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     bool visitSubstitutedTypeSpecifier(SubstitutedTypeSpecifierNode*) { return true; }

@@ -37,6 +37,21 @@ std::string typeToString(Type* type)
             return primitiveTypeKindToString(p->mPrimitiveKind);
         }
 
+        case TypeKind::cMultiReturn:
+        {
+            auto* results = static_cast<const MultiReturnType*>(type);
+            std::string s = "(";
+            for (usize i = 0; i < results->mTypes.size(); ++i)
+            {
+                if (i != 0)
+                {
+                    s += ", ";
+                }
+                s += typeToString(results->mTypes[i]);
+            }
+            return s + ")";
+        }
+
         case TypeKind::cList:
         {
             auto* l = static_cast<const ListType*>(type);

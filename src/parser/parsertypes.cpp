@@ -114,7 +114,7 @@ TypeSpecifierNode* Parser::parseFunctionTypeSpec()
     }
 
     // Parse the return type.
-    TypeSpecifierNode* returnTypeSpecifier = parseTypeSpec();
+    TypeSpecifierNode* returnTypeSpecifier = parseReturnTypeSpec();
     if (returnTypeSpecifier == nullptr)
     {
         return nullptr;
@@ -163,6 +163,44 @@ TypeSpecifierNode* Parser::parseNamedTypeSpec()
 
     ArrayView<TypeSpecifierNode*> typeArgsView = makeArrayView(mCtx.mAllocator, typeArgs);
     return mCtx.create<NamedTypeSpecifierNode>(namedRange, fullNode, typeArgsView);
+}
+
+TypeSpecifierNode* Parser::parseReturnTypeSpec()
+{
+    // Consume the '('.
+    if (check(TokenType::cLeftParen) == false)
+    {
+        return parseTypeSpec();
+    }
+
+    // Parse the type specifiers, separated by ','.
+    Token start = consume();
+    std::vector<TypeSpecifierNode*> types;
+    do
+    {
+        TypeSpecifierNode* type = parseTypeSpec();
+        if (type == nullptr)
+        {
+            return nullptr;
+        }
+
+        types.push_back(type);
+    } while (tryConsume(TokenType::cComma));
+
+    // Consume the ')'.
+    if (expect(TokenType::cRightParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // If we only have 1 type specifier, then this is an error because () implies at least 2 bindings.
+    if (types.size() < 2)
+    {
+        mCtx.report<cMultipleResultsRequired>(makeRangeToPrevious(start));
+        return nullptr;
+    }
+
+    return mCtx.create<MultiReturnTypeSpecifierNode>(makeRangeToPrevious(start), makeArrayView(mCtx.mAllocator, types));
 }
 
 TypeSpecifierNode* Parser::parseTypeSpec()

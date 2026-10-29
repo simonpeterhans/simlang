@@ -121,6 +121,83 @@ static bool isValidConstType(Type* type)
     }
 }
 
+bool TypeCheckVisitor::visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* node)
+{
+    std::vector<Type*> types;
+    bool valid = true;
+
+    // Resolve all the types.
+    for (TypeSpecifierNode* spec : node->mTypes)
+    {
+        // Visit the specifier.
+        if (visit(spec) == false)
+        {
+            return false;
+        }
+
+        // We need a valid type.
+        Type* type = requireValueType(spec->mType, spec->mSourceRange, "a return component");
+
+        // All have to be valid for this node to be valid.
+        valid = valid && isErrorType(type) == false;
+
+        types.push_back(type);
+    }
+
+    // Register the type if we have one.
+    node->mType = valid ? mCtx.mTypes.getOrAddMultiReturn(types) : getErrorType();
+
+    return true;
+}
+
+bool TypeCheckVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    // Resolve the initializer.
+    if (visit(node->mInit) == false)
+    {
+        return false;
+    }
+
+    Type* type = node->mInit->mResolvedType;
+    ArrayView results{&type, 1};
+
+    if (type->mKind == TypeKind::cMultiReturn)
+    {
+        // If we have multiple return types, use that instead.
+        results = static_cast<MultiReturnType*>(type)->mTypes;
+    }
+    else if (getPrimitiveKind(type) == PrimitiveTypeKind::cVoid)
+    {
+        // If we have void, we have none.
+        results = {};
+    }
+
+    // If the size doesn't match and we didn't error on the type already, complain.
+    bool matches = results.size() == node->mBindings.size();
+    if (matches == false && isErrorType(type) == false)
+    {
+        mCtx.report<cResultCountMismatch>(node->mSourceRange, node->mBindings.size(), results.size());
+    }
+
+    // Set the symbol type for every binding that we have.
+    for (usize i = 0; i < node->mBindings.size(); ++i)
+    {
+        if (auto* binding = node->mBindings[i])
+        {
+            Symbol* symbol = binding->mSymbol;
+            symbol->mType = matches ? results[i] : getErrorType();
+
+            if (symbol->mFlags.test(SymbolFlags::cMutable) == false && isErrorType(symbol->mType) == false &&
+                isValidConstType(symbol->mType) == false)
+            {
+                mCtx.report<cInvalidConstType>(binding->mIdentifierRange, typeToString(symbol->mType));
+            }
+        }
+    }
+
+    return true;
+}
+
 bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     Symbol* s = node->mSymbol;
@@ -676,48 +753,73 @@ bool TypeCheckVisitor::visitSwitchStatement(SwitchStatementNode* node)
 
 bool TypeCheckVisitor::visitReturnStatement(ReturnStatementNode* node)
 {
-    // Resolve the expression.
-    if (node->mExpression != nullptr)
+    // Resolve all return expressions that we may have.
+    for (ExpressionNode* expr : node->mExpressions)
     {
-        if (visit(node->mExpression) == false)
+        if (visit(expr) == false)
         {
             return false;
         }
     }
 
-    // Find out what type we're expected to return.
-
-    Type* returnType = nullptr;
-    // If we have no expression, we're returning void.
-    if (node->mExpression == nullptr)
-    {
-        returnType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid);
-    }
-    else
-    {
-        returnType = node->mExpression->mResolvedType;
-    }
-
-    if (isErrorType(returnType) || isErrorType(mCurrentReturnType))
+    // If our current (enclosing) return type isn't valid, bail here.
+    if (isErrorType(mCurrentReturnType))
     {
         return true;
     }
 
-    // Check if the expected type and the provided type match.
-    if (returnType != mCurrentReturnType)
+    if (node->mExpressions.size() == 1)
     {
-        if (node->mExpression != nullptr)
+        // A single expression has one value or forwards an entire result list.
+        // E.g., return 3 or return pair().
+        Type* actual = node->mExpressions[0]->mResolvedType;
+        if (isErrorType(actual))
         {
-            if (convertExpressionToType(node->mExpression, mCurrentReturnType) == false)
-            {
-                return true;
-            }
-
             return true;
         }
 
-        mCtx.report<cTypeMismatch>(node->mSourceRange, typeToString(mCurrentReturnType), typeToString(returnType));
+        if (mCurrentReturnType->mKind == TypeKind::cMultiReturn && actual->mKind != TypeKind::cMultiReturn)
+        {
+            // If a multi-return is expected and we don't have one, that's an error.
+            mCtx.report<cResultCountMismatch>(node->mSourceRange,
+                                              static_cast<MultiReturnType*>(mCurrentReturnType)->mTypes.size(),
+                                              node->mExpressions.size());
+        }
+        else
+        {
+            // Otherwise, check if we're allowed to return this type.
+            convertExpressionToType(node->mExpressions[0], mCurrentReturnType);
+        }
+
         return true;
+    }
+
+    // If we're here, we have something like return or return 3, 4.
+    ArrayView expected{&mCurrentReturnType, 1};
+    // Note that if we're not taking either of these branches, this is going to be an error.
+    // (Having 1 valid return expression would have been handled in the branch above.)
+    if (mCurrentReturnType->mKind == TypeKind::cMultiReturn)
+    {
+        // If we want multiple return types, use these instead.
+        expected = static_cast<MultiReturnType*>(mCurrentReturnType)->mTypes;
+    }
+    else if (getPrimitiveKind(mCurrentReturnType) == PrimitiveTypeKind::cVoid)
+    {
+        // If we have void, use that.
+        expected = {};
+    }
+
+    // Check for size match.
+    if (node->mExpressions.size() != expected.size())
+    {
+        mCtx.report<cResultCountMismatch>(node->mSourceRange, expected.size(), node->mExpressions.size());
+        return true;
+    }
+
+    // Make sure all the expression types match the expected types.
+    for (usize i = 0; i < expected.size(); ++i)
+    {
+        convertExpressionToType(node->mExpressions[i], expected[i]);
     }
 
     return true;

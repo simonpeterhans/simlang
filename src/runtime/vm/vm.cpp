@@ -276,7 +276,7 @@ SIMLANG_NOINLINE void VM::reportRuntimeError(VMAddress address, RuntimeErrorKind
         mRuntimeErrorSink->reportRuntimeError(error, mImage);
     }
 
-    if (mRuntimeErrorMode == RuntimeErrorMode::cHaltOnError)
+    if (mRuntimeErrorMode == RuntimeErrorMode::cHaltOnError || kind == RuntimeErrorKind::cAllocationFailed)
     {
         mHalted = true;
     }

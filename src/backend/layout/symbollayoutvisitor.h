@@ -19,6 +19,7 @@ public:
 
     // Statements.
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node);
     bool visitLambda(LambdaNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);

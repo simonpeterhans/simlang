@@ -160,6 +160,7 @@ private:
     StatementNode* parseAssignment(ExpressionNode* lhs, bool consumeSemi);
     StatementNode* parseExpressionOrAssignment(bool consumeSemi);
     StatementNode* parseVariableDeclaration(bool consumeSemi);
+    StatementNode* parseMultiVariableDeclaration(Token startToken, bool consumeSemi);
     StatementNode* parseIf();
     StatementNode* parseFor();
     StatementNode* parseWhile();
@@ -188,6 +189,7 @@ private:
     TypeSpecifierNode* parseFunctionTypeSpec();
     TypeSpecifierNode* parseNamedTypeSpec();
     TypeSpecifierNode* parseTypeSpec();
+    TypeSpecifierNode* parseReturnTypeSpec();
 
     ParserContext& mCtx;
     Tokenizer& mTokenizer;

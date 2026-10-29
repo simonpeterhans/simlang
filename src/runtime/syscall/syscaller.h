@@ -44,6 +44,7 @@ struct ReadArg
             using V = typename U::ValueType;
             if constexpr (is_valid_vm_map_ref_key_v<K> && is_valid_vm_map_ref_value_v<V>)
             {
+                // Same as for lists, the proxy needs the VM and the handle.
                 return U{vm, words[0]};
             }
             else
@@ -54,6 +55,7 @@ struct ReadArg
         }
         else if constexpr (std::is_same_v<U, VMStringRef>)
         {
+            // For strings, we also need the VM (to get the content) and the string handle.
             VMWord ref = words[0];
             std::string_view sv;
 
@@ -110,24 +112,23 @@ struct Syscaller
     {
         // Get the function pointer that we want to call.
         auto* fn = reinterpret_cast<R (*)(Args...)>(entry.mFunction);
-        // Keep the raw arguments on the VM stack while the syscall runs, so heap handles stay rooted.
-        u32 stackSize = vm.mStack.getSize();
-        if (entry.mArgWords > stackSize)
-        {
-            return false;
-        }
-
-        u32 argBase = stackSize - entry.mArgWords;
+        // Get the start stack index of the arguments (which are on top).
+        u32 argBase = vm.mStack.getSize() - entry.mArgWords;
         const VMWord* argWords = vm.mStack.getData() + argBase;
 
+        // Find out where our temporary roots currently are, and restore them once we return from this.
+        // Temporary roots can currently be created when we read a string from a list or map (so the string survives
+        // in case of list/map manipulation), and they can also be created for multiple heap return results.
         usize tempRootBase = vm.mTempRoots.size();
         OnScopeEnd restoreTempRoots{[&vm, tempRootBase]
                                     {
                                         vm.mTempRoots.resize(tempRootBase);
                                     }};
 
+        // Read the args from the VM (stack).
         auto args = ReadTuple<Args...>::read(vm, argWords);
 
+        // If we failed before somehow, bail right away.
         if (vm.mHalted)
         {
             vm.mStack.setSize(argBase);
@@ -138,141 +139,130 @@ struct Syscaller
         {
             // Make the call.
             std::apply(fn, args);
-            // Pop the args.
+            // If we have no return value, simply resize the stack to clean up.
             vm.mStack.setSize(argBase);
-            if (vm.mHalted)
-            {
-                return false;
-            }
-        }
-        else if constexpr (std::is_same_v<R, i32> || std::is_same_v<R, f32> || std::is_same_v<R, bool>)
-        {
-            // Make the call.
-            R result = std::apply(fn, args);
-            // Pop the args.
-            vm.mStack.setSize(argBase);
-            if (vm.mHalted)
-            {
-                return false;
-            }
-            // Push the result.
-            vm.push<R>(result);
-        }
-        else if constexpr (std::is_same_v<RemoveCVRefT<R>, VMStringResult>)
-        {
-            using Result = RemoveCVRefT<R>;
-
-            // Make the call.
-            Result result = std::apply(fn, args);
-            if (vm.mHalted)
-            {
-                vm.mStack.setSize(argBase);
-                return false;
-            }
-
-            // Create a string on the heap as the result.
-            std::string_view resultView{result.mData.data(), result.mData.size()};
-            VMWord resultRef = cNullRef;
-            bool success = vm.makeStringAlloc(resultView, resultRef);
-
-            // Pop the args.
-            vm.mStack.setSize(argBase);
-            // Push the result.
-            vm.push<VMWord>(resultRef);
-
-            if (success == false && vm.mHalted)
-            {
-                return false;
-            }
-        }
-        else if constexpr (is_vm_list_result<RemoveCVRefT<R>>::value)
-        {
-            using Result = RemoveCVRefT<R>;
-            using Element = typename Result::ElementType;
-
-            // Make the call.
-            Result result = std::apply(fn, args);
-            if (vm.mHalted)
-            {
-                vm.mStack.setSize(argBase);
-                return false;
-            }
-
-            // If the vector is too large, this is an error.
-            if (result.mData.size() > std::numeric_limits<u32>::max())
-            {
-                vm.mStack.setSize(argBase);
-                vm.push<VMWord>(cNullRef);
-                return false;
-            }
-
-            if constexpr (is_valid_vm_list_result_element_v<Element>)
-            {
-                // Create the list on the heap as the result.
-                VMWord resultRef = cNullRef;
-                bool success = makeListResult(vm, result.mData, resultRef);
-
-                // Pop the args.
-                vm.mStack.setSize(argBase);
-                // Push the result list.
-                vm.push<VMWord>(resultRef);
-
-                if (success == false && vm.mHalted)
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                static_assert(always_false_v<R>,
-                              "VMListResult<T> supports only i32, f32, bool, and VMStringResult element types.");
-            }
-        }
-        else if constexpr (is_vm_map_result<RemoveCVRefT<R>>::value)
-        {
-            using Result = RemoveCVRefT<R>;
-            using Key = typename Result::KeyType;
-            using Value = typename Result::ValueType;
-
-            Result result = std::apply(fn, args);
-            if (vm.mHalted)
-            {
-                vm.mStack.setSize(argBase);
-                return false;
-            }
-
-            if (result.mData.size() > std::numeric_limits<u32>::max())
-            {
-                vm.mStack.setSize(argBase);
-                vm.push<VMWord>(cNullRef);
-                return false;
-            }
-
-            if constexpr (is_valid_vm_map_result_key_v<Key> && is_valid_vm_map_result_value_v<Value>)
-            {
-                VMWord resultRef = cNullRef;
-                bool success = makeMapResult(vm, result.mData, resultRef);
-
-                vm.mStack.setSize(argBase);
-                vm.push<VMWord>(resultRef);
-
-                if (success == false && vm.mHalted)
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                static_assert(always_false_v<R>,
-                              "VMMapResult<K, V> supports only i32, f32, bool, and VMStringResult key/value types.");
-            }
+            return vm.mHalted == false;
         }
         else
         {
-            static_assert(always_false_v<R>, "Unsupported syscall return type.");
+            // Make the call.
+            auto result = std::apply(fn, args);
+
+            // Check if we failed.
+            if (vm.mHalted)
+            {
+                vm.mStack.setSize(argBase);
+                return false;
+            }
+
+            // We might have multiple return values.
+            if constexpr (IsSyscallTuple<RemoveCVRefT<R>>::value)
+            {
+                // If we do, we need to root the return values.
+                // We're creating one after another, and all return results that are to be on the heap can trigger GC.
+                // Thus, we need to root them or earlier results may get freed again from the GC ran by the later ones.
+                usize resultBase = vm.mTempRoots.size();
+
+                // Write all of the results to the VM and root what's necessary.
+                bool success = std::apply(
+                    [&vm](const auto&... values)
+                    {
+                        return (writeAndRootResult(vm, values) && ...);
+                    },
+                    result);
+
+                // Pop the args.
+                vm.mStack.setSize(argBase);
+
+                // Check if writing them back succeeded.
+                if (success == false)
+                {
+                    return false;
+                }
+
+                // Push the results.
+                for (usize i = 0; i < entry.mReturnWords; ++i)
+                {
+                    vm.push<VMWord>(vm.mTempRoots[resultBase + i]);
+                }
+
+                return true;
+            }
+            else
+            {
+                // If we only have one, write that.
+                VMWord word = cNullRef;
+                bool success = writeResult(vm, result, word);
+
+                // Pop the stack.
+                vm.mStack.setSize(argBase);
+
+                if (success == false)
+                {
+                    return false;
+                }
+
+                // Push the result.
+                vm.push<VMWord>(word);
+
+                return true;
+            }
+        }
+    }
+
+private:
+    template <typename T>
+    static bool writeAndRootResult(VM& vm, const T& value)
+    {
+        // Writes the value to the VM and roots the address/value received from the VM subsequently.
+        VMWord word = cNullRef;
+        if (writeResult(vm, value, word) == false)
+        {
+            return false;
         }
 
+        vm.mTempRoots.push_back(word);
+
         return true;
+    }
+
+    template <typename T>
+    static bool writeResult(VM& vm, const T& value, VMWord& word)
+    {
+        if constexpr (std::is_same_v<T, i32> || std::is_same_v<T, bool>)
+        {
+            word = static_cast<VMWord>(value);
+            return true;
+        }
+        else if constexpr (std::is_same_v<T, f32>)
+        {
+            word = bits::bitCast<VMWord>(value);
+            return true;
+        }
+        else if constexpr (std::is_same_v<T, VMStringResult>)
+        {
+            return vm.makeStringAlloc(value.mData, word);
+        }
+        else if constexpr (is_vm_list_result_v<T>)
+        {
+            if (value.mData.size() > std::numeric_limits<u32>::max())
+            {
+                return false;
+            }
+            return makeListResult(vm, value.mData, word);
+        }
+        else if constexpr (is_vm_map_result_v<T>)
+        {
+            if (value.mData.size() > std::numeric_limits<u32>::max())
+            {
+                return false;
+            }
+            return makeMapResult(vm, value.mData, word);
+        }
+        else
+        {
+            static_assert(always_false_v<T>, "Unsupported syscall return type.");
+        }
     }
 };
 

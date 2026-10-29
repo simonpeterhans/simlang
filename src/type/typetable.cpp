@@ -57,6 +57,23 @@ FunctionType* TypeTable::getOrAddFunction(Type* returnType, const std::vector<Fu
     return funcType;
 }
 
+MultiReturnType* TypeTable::getOrAddMultiReturn(const std::vector<Type*>& types)
+{
+    auto it = mMultiReturnTypes.find(types);
+    if (it != mMultiReturnTypes.end())
+    {
+        return it->second;
+    }
+
+    // Convert the return types from vector to ArrayView.
+    ArrayView<Type*> returnTypesView = makeArrayView(mAllocator, types);
+
+    auto* type = mAllocator.create<MultiReturnType>(returnTypesView);
+    mMultiReturnTypes.emplace(types, type);
+
+    return type;
+}
+
 ListType* TypeTable::getOrAddList(Type* elementType)
 {
     auto it = mListTypes.find(elementType);

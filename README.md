@@ -30,6 +30,7 @@ feature set of what I would ship in a real-world project (or keep in this implem
 - Modules and imports
 - Formatted strings
 - First-class functions and lambdas (copy by value)
+- Multiple return values
 - Host-provided constants and syscalls (allowing primitives as well as list/map params/return values)
 
 ## Missing Features
@@ -85,9 +86,9 @@ class Terrain
         }
     }
 
-    fun getInfo() : string
+    fun getStats() : (int, int)
     {
-        return $"terrain {this.size.x}x{this.size.y}: {this.tiles.size()} tiles, peak {this.peak}";
+        return tiles.size(), peak;
     }
 }
 
@@ -104,7 +105,8 @@ fun main() : void
         terrain.addTile(i % length, i / length, height);
     }
 
-    print(terrain.getInfo());
+    const (tileCount, peakHeight) = terrain.getStats();
+    print($"terrain {terrain.size.x}x{terrain.size.y}: {tileCount} tiles, peak {peakHeight}");
 
     // Lambdas implicitly capture surrounding locals by value.
     var capturedOffset = 1;

@@ -177,7 +177,7 @@ StatementNode* Parser::parseFunctionDeclaration()
         return nullptr;
     }
 
-    retType = parseTypeSpec();
+    retType = parseReturnTypeSpec();
     if (retType == nullptr)
     {
         return nullptr;

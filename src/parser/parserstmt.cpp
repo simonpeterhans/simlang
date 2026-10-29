@@ -12,6 +12,7 @@
 #include "parser/tokentype.h"
 #include "source/sourcelocation.h"
 #include "source/sourcerange.h"
+#include "symbol/identifier.h"
 #include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
@@ -233,25 +234,11 @@ void Parser::parseMemberSpecifiers(FlagSet<NodeFlagType>& flags)
 StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
 {
     // (var | const) identifier [: type] [= expression]
+    // (var | const) '(' identifier (',' identifier)+ ')' '=' expression
 
     // Keep the first token for range purposes.
     Token startToken = getCurrentToken();
-
-    Token nameToken = cErrorToken;
-    TypeSpecifierNode* typeSpec = nullptr;
-    ExpressionNode* init = nullptr;
     FlagSet<NodeFlagType> flags;
-
-    auto buildNode = [&](SourceRange range)
-    {
-        auto* node = mCtx.create<VariableDeclarationStatementNode>(range,
-                                                                   nameToken.getRange(),
-                                                                   nameToken.mIdentifier,
-                                                                   typeSpec,
-                                                                   init);
-        node->mFlags = flags;
-        return node;
-    };
 
     // Consume declaration and mutability stuff.
     if (tryConsume(TokenType::cVar))
@@ -266,6 +253,27 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
                                       getCurrentTokenText());
         return nullptr;
     }
+
+    // Check if we have a '(' for multi-var declarations.
+    if (check(TokenType::cLeftParen))
+    {
+        return parseMultiVariableDeclaration(startToken, consumeSemi);
+    }
+
+    Token nameToken = cErrorToken;
+    TypeSpecifierNode* typeSpec = nullptr;
+    ExpressionNode* init = nullptr;
+
+    auto buildNode = [&](SourceRange range)
+    {
+        auto* node = mCtx.create<VariableDeclarationStatementNode>(range,
+                                                                   nameToken.getRange(),
+                                                                   nameToken.mIdentifier,
+                                                                   typeSpec,
+                                                                   init);
+        node->mFlags = flags;
+        return node;
+    };
 
     // Parse the variable name.
     if (expect(TokenType::cIdentifier, &nameToken, true) == false)
@@ -322,29 +330,102 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
     return buildNode(range);
 }
 
+StatementNode* Parser::parseMultiVariableDeclaration(Token startToken, bool consumeSemi)
+{
+    // Consume the '('.
+    consume();
+
+    // Here, we expect a list of identifier.
+    std::vector<VariableDeclarationStatementNode*> bindings;
+    do
+    {
+        // Parse the identifier.
+        Token binding = cErrorToken;
+        if (expect(TokenType::cIdentifier, &binding, true) == false)
+        {
+            return nullptr;
+        }
+
+        // If we have a '_', this means we anonymize that part of the multi-value and push null.
+        VariableDeclarationStatementNode* decl = nullptr;
+        if (identifierEquals(binding.mIdentifier, "_") == false)
+        {
+            // Otherwise, create a new variable declaration statement node with the info that we have.
+            decl = mCtx.create<VariableDeclarationStatementNode>(binding.getRange(),
+                                                                 binding.getRange(),
+                                                                 binding.mIdentifier,
+                                                                 nullptr,
+                                                                 nullptr);
+            // 'var' for variable, 'const' for const.
+            decl->mFlags.set(cStmtIsMutable, startToken.mType == TokenType::cVar);
+        }
+
+        // Push it on and go again.
+        bindings.push_back(decl);
+    } while (tryConsume(TokenType::cComma));
+
+    // Consume the ')'.
+    if (expect(TokenType::cRightParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Consume the '='.
+    if (expect(TokenType::cAss, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Parse the expression.
+    ExpressionNode* init = parseExpression();
+    if (init == nullptr || (consumeSemi && expectSemi() == false))
+    {
+        return nullptr;
+    }
+
+    // If we only have 1 binding, then this is an error because () implies at least 2 bindings.
+    if (bindings.size() < 2)
+    {
+        mCtx.report<cMultipleResultsRequired>(makeRangeToPrevious(startToken));
+        return nullptr;
+    }
+
+    return mCtx.create<MultiVariableDeclarationStatementNode>(makeRangeToPrevious(startToken),
+                                                              makeArrayView(mCtx.mAllocator, bindings),
+                                                              init);
+}
+
 StatementNode* Parser::parseReturn()
 {
+    // return [expression (',' expression)*] ';'
+
     // Consume the "return".
     Token returnToken = consume();
-    ExpressionNode* expr = nullptr;
+    std::vector<ExpressionNode*> expressions;
 
     // Parse the optional return expression.
     if (check(TokenType::cSemiColon) == false)
     {
-        expr = parseExpression();
-        if (expr == nullptr)
+        do
         {
-            return nullptr;
-        }
+            // Parse the expression.
+            ExpressionNode* expr = parseExpression();
+            if (expr == nullptr)
+            {
+                return nullptr;
+            }
+            expressions.push_back(expr);
+        } while (tryConsume(TokenType::cComma));
     }
 
-    // Consume the ';'.
+    // Parse the ';'.
     if (expectSemi() == false)
     {
         return nullptr;
     }
 
-    return mCtx.create<ReturnStatementNode>(makeRangeToPrevious(returnToken), expr);
+    return mCtx.create<ReturnStatementNode>(makeRangeToPrevious(returnToken),
+                                            makeArrayView(mCtx.mAllocator, expressions));
 }
 
 StatementNode* Parser::parseIf()

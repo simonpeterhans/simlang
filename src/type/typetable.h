@@ -33,7 +33,6 @@ struct FunctionSignatureKeyHash
     {
         std::size_t h = 0;
         hashCombine(h, key.mReturnType);
-
         for (const FunctionParam& t : key.mParamTypes)
         {
             hashCombine(h, t.mType);
@@ -62,12 +61,26 @@ struct MapTypeKeyHash
     }
 };
 
+struct MultiReturnTypeKeyHash
+{
+    std::size_t operator()(const std::vector<Type*>& types) const
+    {
+        std::size_t h = 0;
+        for (Type* type : types)
+        {
+            hashCombine(h, type);
+        }
+        return h;
+    }
+};
+
 class TypeTable
 {
 public:
     explicit TypeTable(ArenaAllocator& allocator);
 
     FunctionType* getOrAddFunction(Type* returnType, const std::vector<FunctionParam>& paramTypes);
+    MultiReturnType* getOrAddMultiReturn(const std::vector<Type*>& types);
     ListType* getOrAddList(Type* elementType);
     MapType* getOrAddMap(Type* keyType, Type* valueType);
     AggregateType* getOrAddAggregateType(Symbol* typeSymbol);
@@ -87,6 +100,7 @@ private:
 
     // Create or look up function type by signature.
     std::unordered_map<FunctionSignatureKey, FunctionType*, FunctionSignatureKeyHash> mFunctionTypes;
+    std::unordered_map<std::vector<Type*>, MultiReturnType*, MultiReturnTypeKeyHash> mMultiReturnTypes;
     // Create or look up list type by type of the element.
     std::unordered_map<Type*, ListType*> mListTypes;
     // Create or look up map type by key/value type pair.

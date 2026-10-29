@@ -171,6 +171,11 @@ bool CodeGenVisitor::emitInterfaceMethodDispatch(MemberAccessNode* memberAccess,
     }
 
     u32 returnWords = layout::getWordSizeForType(funcType->mReturnType);
+    if (returnWords > cMaxReturnWords)
+    {
+        mCtx.report<cFunctionFrameTooLarge>(memberAccess->mSourceRange, returnWords, "return", cMaxReturnWords);
+        return false;
+    }
 
     // The interface method slot we can simply take from the member access node.
     auto slot = static_cast<InterfaceMethodSlot>(memberAccess->mSymbol->mIndex);
@@ -548,6 +553,7 @@ bool CodeGenVisitor::emitIndirectFunctionCall(FunctionCallNode* node)
     {
         argWords += param.mIsInOut ? 1U : layout::getWordSizeForType(param.mType);
     }
+
     if (argWords > cMaxOpWordCount)
     {
         mCtx.report<cFunctionFrameTooLarge>(node->mSourceRange, argWords, "argument", cMaxOpWordCount);
@@ -555,6 +561,12 @@ bool CodeGenVisitor::emitIndirectFunctionCall(FunctionCallNode* node)
     }
 
     u32 returnWords = layout::getWordSizeForType(funcType->mReturnType);
+    if (returnWords > cMaxReturnWords)
+    {
+        mCtx.report<cFunctionFrameTooLarge>(node->mSourceRange, returnWords, "return", cMaxReturnWords);
+        return false;
+    }
+
     emit<OpCode::cCallValue>(static_cast<OpWordCount>(argWords), static_cast<ReturnWordCount>(returnWords));
 
     return true;

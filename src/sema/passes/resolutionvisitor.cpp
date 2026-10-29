@@ -265,6 +265,34 @@ bool ResolutionVisitor::visitForStatement(ForStatementNode* node)
     return true;
 }
 
+bool ResolutionVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
+{
+    usize initializingBase = mInitializingSymbols.size();
+
+    for (VariableDeclarationStatementNode* binding : node->mBindings)
+    {
+        // Resolve the declaration.
+        if (visit(binding) == false)
+        {
+            return false;
+        }
+
+        // If we have a symbol, mark it as initializing (no self-ref!).
+        if (binding != nullptr && binding->mSymbol != nullptr)
+        {
+            mInitializingSymbols.push_back(binding->mSymbol);
+        }
+    }
+
+    // Visit the initializer.
+    bool success = visit(node->mInit);
+
+    // Clean the symbols that are to be initialized since we finished.
+    mInitializingSymbols.resize(initializingBase);
+
+    return success;
+}
+
 bool ResolutionVisitor::visitVariableDeclarationStatement(VariableDeclarationStatementNode* node)
 {
     // If we have no symbol yet, this must be a local variable.
@@ -648,6 +676,35 @@ bool ResolutionVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* no
     }
 
     node->mType = mCtx.mTypes.getOrAddFunction(node->mReturnTypeSpecifier->mType, params);
+
+    return true;
+}
+
+bool ResolutionVisitor::visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNode* node)
+{
+    std::vector<Type*> types;
+
+    // Resolve all return types.
+    for (TypeSpecifierNode* type : node->mTypes)
+    {
+        // Resolve the type.
+        if (visit(type) == false)
+        {
+            return false;
+        }
+
+        // If we failed, bail.
+        if (type->mType == nullptr)
+        {
+            return true;
+        }
+
+        // Add it to our types.
+        types.push_back(type->mType);
+    }
+
+    // Get or register the types as multi return type.
+    node->mType = mCtx.mTypes.getOrAddMultiReturn(types);
 
     return true;
 }

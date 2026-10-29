@@ -1,5 +1,7 @@
 #include "backend/layout/layout.h"
 
+#include <algorithm>
+
 #include "type/typekind.h"
 #include "type/types.h"
 #include "util/asserts.h"
@@ -39,6 +41,16 @@ u32 getWordSizeForType(Type* type)
                     return 0;
                 }
             }
+        }
+        case TypeKind::cMultiReturn:
+        {
+            u64 words = 0;
+            for (Type* result : static_cast<MultiReturnType*>(type)->mTypes)
+            {
+                words += getWordSizeForType(result);
+            }
+            // Return widths are checked when callable metadata is built.
+            return static_cast<u32>(std::min(words, cMaxReturnWords + 1U));
         }
         case TypeKind::cStruct:
         {

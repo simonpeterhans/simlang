@@ -81,6 +81,17 @@ struct FunctionType : Type
     ArrayView<FunctionParam> mParamTypes;
 };
 
+struct MultiReturnType : Type
+{
+    explicit MultiReturnType(ArrayView<Type*> types)
+        : Type(TypeKind::cMultiReturn)
+        , mTypes(types)
+    {
+    }
+
+    ArrayView<Type*> mTypes;
+};
+
 struct ListType : Type
 {
     constexpr explicit ListType(Type* element)

@@ -199,6 +199,7 @@ bool TypeCheckVisitor::convertExpressionToType(ExpressionNode*& expr, Type* targ
     }
 
     mCtx.report<cTypeMismatch>(expr->mSourceRange, typeToString(targetType), typeToString(expr->mResolvedType));
+
     return false;
 }
 
@@ -226,6 +227,7 @@ bool TypeCheckVisitor::convertArgumentToParameterType(ExpressionNode*& expr, Typ
                                       argIndex + 1,
                                       typeToString(targetType),
                                       typeToString(expr->mResolvedType));
+
     return false;
 }
 

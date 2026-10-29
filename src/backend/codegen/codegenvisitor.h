@@ -65,6 +65,7 @@ public:
     bool visitExpressionStatement(ExpressionStatementNode* node);
     bool visitAssignmentStatement(AssignmentStatementNode* node);
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node);
     bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
     bool visitIfStatement(IfStatementNode* node);
