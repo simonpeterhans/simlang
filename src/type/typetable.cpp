@@ -27,9 +27,10 @@ TypeTable::TypeTable(ArenaAllocator& allocator)
     mAggregateTypes.reserve(cInitialAggregateTypeCapacity);
     mInterfaceTypes.reserve(cInitialInterfaceTypeCapacity);
 
-    // Create the error and null type right away.
+    // Create the common stuff right away.
     mErrorType = mAllocator.create<ErrorType>();
     mNullType = mAllocator.create<NullType>();
+    mVoidType = mAllocator.create<VoidType>();
 
     // The same goes for the primitives.
     for (PrimitiveTypeKind ptk : cPrimitiveTypeKinds)

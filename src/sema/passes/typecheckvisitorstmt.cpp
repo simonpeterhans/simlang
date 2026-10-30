@@ -87,14 +87,14 @@ static bool isSupportedMapKeyType(Type* type)
         return true;
     }
 
-    // Primitives are also allowed (but not void).
+    // If it's not a class, it has to be a primitive.
     if (type->mKind != TypeKind::cPrimitive)
     {
         return false;
     }
 
     PrimitiveTypeKind kind = getPrimitiveKind(type);
-    return kind != PrimitiveTypeKind::cInvalid && kind != PrimitiveTypeKind::cVoid;
+    return kind != PrimitiveTypeKind::cInvalid;
 }
 
 static bool isSupportedMapValueType(Type* type)
@@ -139,7 +139,7 @@ bool TypeCheckVisitor::visitMultiReturnTypeSpecifier(MultiReturnTypeSpecifierNod
         Type* type = requireValueType(spec->mType, spec->mSourceRange, "a return component");
 
         // All have to be valid for this node to be valid.
-        valid = valid && isErrorType(type) == false;
+        valid = valid && isMissingOrErrorType(type) == false;
 
         types.push_back(type);
     }
@@ -166,7 +166,7 @@ bool TypeCheckVisitor::visitMultiVariableDeclarationStatement(MultiVariableDecla
         // If we have multiple return types, use that instead.
         results = static_cast<MultiReturnType*>(type)->mTypes;
     }
-    else if (getPrimitiveKind(type) == PrimitiveTypeKind::cVoid)
+    else if (type->mKind == TypeKind::cVoid)
     {
         // If we have void, we have none.
         results = {};
@@ -174,7 +174,7 @@ bool TypeCheckVisitor::visitMultiVariableDeclarationStatement(MultiVariableDecla
 
     // If the size doesn't match and we didn't error on the type already, complain.
     bool matches = results.size() == node->mBindings.size();
-    if (matches == false && isErrorType(type) == false)
+    if (matches == false && isMissingOrErrorType(type) == false)
     {
         mCtx.report<cResultCountMismatch>(node->mSourceRange, node->mBindings.size(), results.size());
     }
@@ -187,7 +187,7 @@ bool TypeCheckVisitor::visitMultiVariableDeclarationStatement(MultiVariableDecla
             Symbol* symbol = binding->mSymbol;
             symbol->mType = matches ? results[i] : getErrorType();
 
-            if (symbol->mFlags.test(SymbolFlags::cMutable) == false && isErrorType(symbol->mType) == false &&
+            if (symbol->mFlags.test(SymbolFlags::cMutable) == false && isMissingOrErrorType(symbol->mType) == false &&
                 isValidConstType(symbol->mType) == false)
             {
                 mCtx.report<cInvalidConstType>(binding->mIdentifierRange, typeToString(symbol->mType));
@@ -238,7 +238,7 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
         }
 
         Type* inferredType = requireValueType(initType, node->mInit->mSourceRange, "a variable type");
-        if (isErrorType(inferredType))
+        if (isMissingOrErrorType(inferredType))
         {
             node->mSymbol->mType = getErrorType();
             return true;
@@ -267,7 +267,7 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
     bool hasValidConstType = true;
 
     // If we have one, make sure the type is valid.
-    if (isConstDeclaration && isErrorType(s->mType) == false)
+    if (isConstDeclaration && isMissingOrErrorType(s->mType) == false)
     {
         hasValidConstType = isValidConstType(s->mType);
         if (hasValidConstType == false)
@@ -318,8 +318,8 @@ bool TypeCheckVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStat
         return false;
     }
 
-    if (node->mBody != nullptr && isErrorType(functionReturnType) == false &&
-        getPrimitiveKind(functionReturnType) != PrimitiveTypeKind::cVoid)
+    if (node->mBody != nullptr && isMissingOrErrorType(functionReturnType) == false &&
+        functionReturnType->mKind != TypeKind::cVoid)
     {
         if (bodyEndsWithReturn(node->mBody) == false)
         {
@@ -334,15 +334,20 @@ bool TypeCheckVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStat
 
 bool TypeCheckVisitor::visitLambda(LambdaNode* node)
 {
-    // Resolve the return type.
-    if (visit(node->mReturnTypeSpec) == false)
+    // Resolve the return type if we have one.
+    Type* returnType = mCtx.mTypes.getVoidType();
+    if (node->mReturnTypeSpec != nullptr)
     {
-        return false;
-    }
+        if (visit(node->mReturnTypeSpec) == false)
+        {
+            return false;
+        }
 
-    Type* returnType =
-        requireNonNullType(node->mReturnTypeSpec->mType, node->mReturnTypeSpec->mSourceRange, "a lambda return type");
-    node->mReturnTypeSpec->mType = returnType;
+        returnType = requireNonNullType(node->mReturnTypeSpec->mType,
+                                        node->mReturnTypeSpec->mSourceRange,
+                                        "a lambda return type");
+        node->mReturnTypeSpec->mType = returnType;
+    }
 
     // Resolve the params.
     std::vector<FunctionParam> paramTypes;
@@ -381,7 +386,7 @@ bool TypeCheckVisitor::visitLambda(LambdaNode* node)
     }
 
     // Like for functions, we also expect a return here.
-    if (isErrorType(returnType) == false && getPrimitiveKind(returnType) != PrimitiveTypeKind::cVoid &&
+    if (isMissingOrErrorType(returnType) == false && returnType->mKind != TypeKind::cVoid &&
         bodyEndsWithReturn(node->mBody) == false)
     {
         mCtx.report<cMissingLambdaReturn>(node->mSourceRange, typeToString(returnType));
@@ -461,11 +466,11 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
 
     if (node->mType->mKind == TypeKind::cList)
     {
-        // Check the element type (disallow null/void).
+        // Check that the element type can be stored as a value.
         auto* listType = static_cast<ListType*>(node->mType);
         Type* elementType =
             requireValueType(listType->mElement, node->mTypeArgs[0]->mSourceRange, "a list element type");
-        if (isErrorType(elementType))
+        if (isMissingOrErrorType(elementType))
         {
             node->mType = getErrorType();
             return true;
@@ -489,7 +494,7 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
         auto* mapType = static_cast<MapType*>(node->mType);
         Type* keyType = requireValueType(mapType->mKey, node->mTypeArgs[0]->mSourceRange, "a map key type");
         Type* valueType = requireValueType(mapType->mValue, node->mTypeArgs[1]->mSourceRange, "a map value type");
-        if (isErrorType(keyType) || isErrorType(valueType))
+        if (isMissingOrErrorType(keyType) || isMissingOrErrorType(valueType))
         {
             node->mType = getErrorType();
             return true;
@@ -540,7 +545,7 @@ bool TypeCheckVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* nod
             requireValueType(typeSpecifier->mType, typeSpecifier->mSourceRange, "a function-type parameter");
         typeSpecifier->mType = paramType;
 
-        if (isErrorType(paramType))
+        if (isMissingOrErrorType(paramType))
         {
             valid = false;
         }
@@ -549,19 +554,23 @@ bool TypeCheckVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* nod
     }
 
     // Resolve and validate the return type.
+    Type* returnType = mCtx.mTypes.getVoidType();
     TypeSpecifierNode* returnTypeSpecifier = node->mReturnTypeSpecifier;
-    if (visit(returnTypeSpecifier) == false)
+    if (returnTypeSpecifier != nullptr)
     {
-        return false;
+        if (visit(returnTypeSpecifier) == false)
+        {
+            return false;
+        }
+
+        // The return type cannot be null or empty.
+        returnType = requireNonNullType(returnTypeSpecifier->mType,
+                                        returnTypeSpecifier->mSourceRange,
+                                        "a function-type return type");
+        returnTypeSpecifier->mType = returnType;
     }
 
-    // This can be void, but not null.
-    Type* returnType = requireNonNullType(returnTypeSpecifier->mType,
-                                          returnTypeSpecifier->mSourceRange,
-                                          "a function-type return type");
-    returnTypeSpecifier->mType = returnType;
-
-    if (isErrorType(returnType))
+    if (isMissingOrErrorType(returnType))
     {
         valid = false;
     }
@@ -763,7 +772,7 @@ bool TypeCheckVisitor::visitReturnStatement(ReturnStatementNode* node)
     }
 
     // If our current (enclosing) return type isn't valid, bail here.
-    if (isErrorType(mCurrentReturnType))
+    if (isMissingOrErrorType(mCurrentReturnType))
     {
         return true;
     }
@@ -773,7 +782,7 @@ bool TypeCheckVisitor::visitReturnStatement(ReturnStatementNode* node)
         // A single expression has one value or forwards an entire result list.
         // E.g., return 3 or return pair().
         Type* actual = node->mExpressions[0]->mResolvedType;
-        if (isErrorType(actual))
+        if (isMissingOrErrorType(actual))
         {
             return true;
         }
@@ -803,9 +812,9 @@ bool TypeCheckVisitor::visitReturnStatement(ReturnStatementNode* node)
         // If we want multiple return types, use these instead.
         expected = static_cast<MultiReturnType*>(mCurrentReturnType)->mTypes;
     }
-    else if (getPrimitiveKind(mCurrentReturnType) == PrimitiveTypeKind::cVoid)
+    else if (mCurrentReturnType->mKind == TypeKind::cVoid)
     {
-        // If we have void, use that.
+        // A no-result function expects no return expressions.
         expected = {};
     }
 
@@ -861,7 +870,7 @@ bool TypeCheckVisitor::visitPrintStatement(PrintStatementNode* node)
     }
 
     // Check if the expression is printable.
-    if (requireNonVoidPrimitive(node->mExpression) == false)
+    if (requirePrintablePrimitive(node->mExpression) == false)
     {
         return true;
     }

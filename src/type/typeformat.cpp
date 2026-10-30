@@ -31,6 +31,11 @@ std::string typeToString(Type* type)
             return "null";
         }
 
+        case TypeKind::cVoid:
+        {
+            return "none";
+        }
+
         case TypeKind::cPrimitive:
         {
             auto* p = static_cast<const PrimitiveType*>(type);
@@ -108,8 +113,12 @@ std::string typeToString(Type* type)
                 s += typeToString(param.mType);
             }
 
-            s += ") -> ";
-            s += typeToString(f->mReturnType);
+            s += ')';
+            if (f->mReturnType->mKind != TypeKind::cVoid)
+            {
+                s += " -> ";
+                s += typeToString(f->mReturnType);
+            }
             return s;
         }
 

@@ -266,17 +266,15 @@ ExpressionNode* Parser::parseLambda()
         return nullptr;
     }
 
-    // Consume the '->'.
-    if (expect(TokenType::cArrow, nullptr, true) == false)
+    // Without an arrow, the lambda has no result.
+    TypeSpecifierNode* returnTypeSpec = nullptr;
+    if (tryConsume(TokenType::cArrow))
     {
-        return nullptr;
-    }
-
-    // Parse the return type.
-    TypeSpecifierNode* returnTypeSpec = parseReturnTypeSpec();
-    if (returnTypeSpec == nullptr)
-    {
-        return nullptr;
+        returnTypeSpec = parseReturnTypeSpec();
+        if (returnTypeSpec == nullptr)
+        {
+            return nullptr;
+        }
     }
 
     // Expect a block start.

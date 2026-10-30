@@ -172,15 +172,13 @@ StatementNode* Parser::parseFunctionDeclaration()
         return nullptr;
     }
 
-    if (expect(TokenType::cArrow, nullptr, true) == false)
+    if (tryConsume(TokenType::cArrow))
     {
-        return nullptr;
-    }
-
-    retType = parseReturnTypeSpec();
-    if (retType == nullptr)
-    {
-        return nullptr;
+        retType = parseReturnTypeSpec();
+        if (retType == nullptr)
+        {
+            return nullptr;
+        }
     }
 
     if (mInInterface)

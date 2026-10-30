@@ -136,7 +136,7 @@ X( cInterfaceMethodMissingImpl,           cError,   "Missing impl specifier.",  
 // Validation and limits.
 X( cMissingMainFunction,                  cError,   "Missing entry point.",                    "Program entry point 'main' was not found." )
 X( cDuplicateMainFunction,                cError,   "Duplicate main entry point.",             "Program entry point 'main' can only be defined once." )
-X( cInvalidMainSignature,                 cError,   "Invalid entry point.",                    "Program entry point 'main' must be a top-level function with no parameters and return type 'void'." )
+X( cInvalidMainSignature,                 cError,   "Invalid entry point.",                    "Program entry point 'main' must be a top-level function with no parameters and no return value." )
 X( cRecursiveValueType,                   cError,   "Recursive value type.",                   "Type '{}' creates a recursive by-value struct layout. Use a class or list for recursive references." )
 X( cEmptyStruct,                          cError,   "Empty struct.",                           "Struct '{}' must declare at least one stored field." )
 X( cTooManyTypes,                         cError,   "Too many types.",                         "Type '{}' would need type ID {}, but the VM supports IDs up to {}." )

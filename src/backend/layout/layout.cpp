@@ -19,15 +19,16 @@ u32 getWordSizeForType(Type* type)
 
     switch (type->mKind)
     {
+        case TypeKind::cVoid:
+        {
+            return 0;
+        }
+
         case TypeKind::cPrimitive:
         {
             auto* pt = static_cast<PrimitiveType*>(type);
             switch (pt->mPrimitiveKind)
             {
-                case PrimitiveTypeKind::cVoid:
-                {
-                    return 0;
-                }
                 case PrimitiveTypeKind::cInt:
                 case PrimitiveTypeKind::cFloat:
                 case PrimitiveTypeKind::cBool:

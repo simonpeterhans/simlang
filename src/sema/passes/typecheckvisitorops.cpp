@@ -74,7 +74,7 @@ static bool isConstExprZero(ExpressionNode* expr, ArenaAllocator& allocator)
 
 bool TypeCheckVisitor::allowImplicitCast(Type* fromType, Type* toType)
 {
-    if (isErrorType(fromType) || isErrorType(toType))
+    if (isMissingOrErrorType(fromType) || isMissingOrErrorType(toType))
     {
         return false;
     }
@@ -116,7 +116,7 @@ bool TypeCheckVisitor::allowImplicitCast(Type* fromType, Type* toType)
 
 bool TypeCheckVisitor::allowExplicitCast(Type* fromType, Type* toType)
 {
-    if (isErrorType(fromType) || isErrorType(toType))
+    if (isMissingOrErrorType(fromType) || isMissingOrErrorType(toType))
     {
         return false;
     }
@@ -180,7 +180,7 @@ ImplicitCastNode* TypeCheckVisitor::createImplicitCast(ExpressionNode* node, Typ
 
 bool TypeCheckVisitor::convertExpressionToType(ExpressionNode*& expr, Type* targetType)
 {
-    if (isErrorType(expr->mResolvedType) || isErrorType(targetType))
+    if (isMissingOrErrorType(expr->mResolvedType) || isMissingOrErrorType(targetType))
     {
         return true;
     }
@@ -205,7 +205,7 @@ bool TypeCheckVisitor::convertExpressionToType(ExpressionNode*& expr, Type* targ
 
 bool TypeCheckVisitor::convertArgumentToParameterType(ExpressionNode*& expr, Type* targetType, usize argIndex)
 {
-    if (isErrorType(expr->mResolvedType) || isErrorType(targetType))
+    if (isMissingOrErrorType(expr->mResolvedType) || isMissingOrErrorType(targetType))
     {
         return true;
     }
@@ -308,7 +308,7 @@ bool TypeCheckVisitor::isInitializerFieldAssignment(AssignmentStatementNode* nod
 bool TypeCheckVisitor::requireAssignableLValue(ExpressionNode* expr, bool allowImmutable) const
 {
     // Error types are always assignable (?).
-    if (isErrorType(expr->mResolvedType))
+    if (isMissingOrErrorType(expr->mResolvedType))
     {
         return true;
     }
@@ -352,7 +352,7 @@ bool TypeCheckVisitor::checkMemberAccess(Symbol* symbol, Symbol* ownerTypeSymbol
 
 bool TypeCheckVisitor::requireBoolExpression(ExpressionNode* expr) const
 {
-    if (isErrorType(expr->mResolvedType))
+    if (isMissingOrErrorType(expr->mResolvedType))
     {
         return true;
     }
@@ -368,15 +368,14 @@ bool TypeCheckVisitor::requireBoolExpression(ExpressionNode* expr) const
     return false;
 }
 
-bool TypeCheckVisitor::requireNonVoidPrimitive(ExpressionNode* expr) const
+bool TypeCheckVisitor::requirePrintablePrimitive(ExpressionNode* expr) const
 {
-    if (isErrorType(expr->mResolvedType))
+    if (isMissingOrErrorType(expr->mResolvedType))
     {
         return true;
     }
 
-    if (expr->mResolvedType->mKind == TypeKind::cPrimitive &&
-        getPrimitiveKind(expr->mResolvedType) != PrimitiveTypeKind::cVoid)
+    if (expr->mResolvedType->mKind == TypeKind::cPrimitive)
     {
         return true;
     }
@@ -540,9 +539,8 @@ void TypeCheckVisitor::resolveBinaryEqualityOps(BinaryOpNode* node)
     PrimitiveTypeKind lhsPtk = getPrimitiveKind(lhs->mResolvedType);
     PrimitiveTypeKind rhsPtk = getPrimitiveKind(rhs->mResolvedType);
 
-    // Invalid and void values are never comparable.
-    if (lhsPtk == PrimitiveTypeKind::cInvalid || rhsPtk == PrimitiveTypeKind::cInvalid ||
-        lhsPtk == PrimitiveTypeKind::cVoid || rhsPtk == PrimitiveTypeKind::cVoid)
+    // Invalid primitive kinds are never comparable.
+    if (lhsPtk == PrimitiveTypeKind::cInvalid || rhsPtk == PrimitiveTypeKind::cInvalid)
     {
         diagnoseInvalidBinaryOperands(node);
         return;
@@ -843,7 +841,7 @@ bool TypeCheckVisitor::visitTernaryExpr(TernaryExprNode* node)
         }
     }
 
-    if (getPrimitiveKind(node->mResolvedType) == PrimitiveTypeKind::cVoid)
+    if (node->mResolvedType->mKind == TypeKind::cVoid)
     {
         mCtx.report<cInvalidTypeInContext>(node->mSourceRange,
                                            typeToString(node->mResolvedType),

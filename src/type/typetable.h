@@ -89,6 +89,7 @@ public:
     PrimitiveType* getPrimitiveType(PrimitiveTypeKind kind) const;
     NullType* getNullType() const { return mNullType; }
     ErrorType* getErrorType() const { return mErrorType; }
+    VoidType* getVoidType() const { return mVoidType; }
 
 private:
     ArenaAllocator& mAllocator;
@@ -97,6 +98,7 @@ private:
     std::array<PrimitiveType*, static_cast<usize>(PrimitiveTypeKind::cCount)> mPrimitiveTypes{};
     NullType* mNullType = nullptr;
     ErrorType* mErrorType = nullptr;
+    VoidType* mVoidType = nullptr;
 
     // Create or look up function type by signature.
     std::unordered_map<FunctionSignatureKey, FunctionType*, FunctionSignatureKeyHash> mFunctionTypes;

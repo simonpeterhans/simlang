@@ -50,7 +50,7 @@ Type* TypeCheckVisitor::getErrorType() const
     return mCtx.mTypes.getErrorType();
 }
 
-bool TypeCheckVisitor::isErrorType(Type* type) const
+bool TypeCheckVisitor::isMissingOrErrorType(Type* type) const
 {
     return (type == nullptr || type->mKind == TypeKind::cError);
 }
@@ -66,7 +66,7 @@ void TypeCheckVisitor::markError(ExpressionNode* expr) const
 Type* TypeCheckVisitor::requireNonNullType(Type* type, SourceRange range, const char* context) const
 {
     // If this is an error type, return that, assuming that the error has already been reported.
-    if (isErrorType(type))
+    if (isMissingOrErrorType(type))
     {
         return getErrorType();
     }
@@ -85,13 +85,13 @@ Type* TypeCheckVisitor::requireValueType(Type* type, SourceRange range, const ch
 {
     // If this is an error or a null type, return the error type.
     type = requireNonNullType(type, range, context);
-    if (isErrorType(type))
+    if (isMissingOrErrorType(type))
     {
         return getErrorType();
     }
 
     // Void and result lists cannot be used as ordinary values.
-    if (getPrimitiveKind(type) == PrimitiveTypeKind::cVoid || type->mKind == TypeKind::cMultiReturn)
+    if (type->mKind == TypeKind::cVoid || type->mKind == TypeKind::cMultiReturn)
     {
         mCtx.report<cInvalidTypeInContext>(range, typeToString(type), context);
         return getErrorType();

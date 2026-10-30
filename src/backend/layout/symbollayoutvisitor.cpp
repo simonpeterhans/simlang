@@ -177,8 +177,7 @@ bool SymbolLayoutVisitor::visitFunctionDeclarationStatement(FunctionDeclarationS
                 return false;
             }
 
-            if (ft->mReturnType != mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid) ||
-                ft->mParamTypes.empty() == false)
+            if (ft->mReturnType->mKind != TypeKind::cVoid || ft->mParamTypes.empty() == false)
             {
                 mCtx.report<cInvalidMainSignature>(node->mIdentifierRange);
                 return false;

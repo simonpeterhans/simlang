@@ -39,6 +39,14 @@ struct NullType : Type
     }
 };
 
+struct VoidType : Type
+{
+    VoidType()
+        : Type(TypeKind::cVoid)
+    {
+    }
+};
+
 struct PrimitiveType : Type
 {
     constexpr explicit PrimitiveType(PrimitiveTypeKind kind)

@@ -11,7 +11,6 @@ TypeID getRuntimePrimitiveTypeID(PrimitiveTypeKind kind)
 {
     switch (kind)
     {
-        case PrimitiveTypeKind::cVoid: return cVoidTypeID;
         case PrimitiveTypeKind::cInt: return cIntTypeID;
         case PrimitiveTypeKind::cFloat: return cFloatTypeID;
         case PrimitiveTypeKind::cBool: return cBoolTypeID;
@@ -75,7 +74,6 @@ const char* getRuntimeBuiltinTypeIDName(TypeID id)
 {
     switch (id)
     {
-        case cVoidTypeID: return "void";
         case cIntTypeID: return "int";
         case cFloatTypeID: return "float";
         case cBoolTypeID: return "bool";

@@ -273,7 +273,7 @@ bool CodeGenVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStatem
 
     // If we have void as the return type we may have to add a return op.
     auto* functionType = static_cast<FunctionType*>(s->mType);
-    if (getPrimitiveKind(functionType->mReturnType) == PrimitiveTypeKind::cVoid)
+    if (functionType->mReturnType->mKind == TypeKind::cVoid)
     {
         // If we don't have a return statement, we need to emit a return with no value.
         emit<OpCode::cReturn>();

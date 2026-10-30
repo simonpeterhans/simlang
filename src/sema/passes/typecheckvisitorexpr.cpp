@@ -91,7 +91,7 @@ bool TypeCheckVisitor::visitCast(CastNode* node)
     node->mTypeSpecifier->mType = targetType;
 
     // If we get an error type, we're done.
-    if (isErrorType(targetType))
+    if (isMissingOrErrorType(targetType))
     {
         markError(node);
         return true;
@@ -230,7 +230,7 @@ bool TypeCheckVisitor::visitFormatString(FormatStringNode* node)
             continue;
         }
 
-        if (requireNonVoidPrimitive(arg) == false)
+        if (requirePrintablePrimitive(arg) == false)
         {
             argsOk = false;
             continue;
@@ -259,7 +259,7 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
 
     // Get the resolved type, which has to match the construction keyword.
     Type* baseType = node->mTypeSpecifier->mType;
-    if (isErrorType(baseType))
+    if (isMissingOrErrorType(baseType))
     {
         markError(node);
         return true;
@@ -437,7 +437,7 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         init->mResolvedField = field;
 
         // If something went wrong earlier for the field or initializer, skip it.
-        if (hasValidResolvedType(init->mValue) == false || isErrorType(field->mType))
+        if (hasValidResolvedType(init->mValue) == false || isMissingOrErrorType(field->mType))
         {
             initializersOk = false;
             continue;
@@ -513,7 +513,7 @@ bool TypeCheckVisitor::checkCallArguments(SourceRange range,
 
         const FunctionParam& param = funcType->mParamTypes[i];
         bool isInOutArgument = callArgument.mIsInOut;
-        if (isErrorType(param.mType))
+        if (isMissingOrErrorType(param.mType))
         {
             argsOk = false;
             continue;
@@ -739,7 +739,7 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
     if (receiverType->mKind == TypeKind::cList)
     {
         auto* listType = static_cast<ListType*>(receiverType);
-        Type* voidType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid);
+        Type* voidType = mCtx.mTypes.getVoidType();
         Type* intType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
         Type* boolType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
         Type* returnType = nullptr;
@@ -825,7 +825,7 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
     if (receiverType->mKind == TypeKind::cMap)
     {
         auto* mapType = static_cast<MapType*>(receiverType);
-        Type* voidType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid);
+        Type* voidType = mCtx.mTypes.getVoidType();
         Type* intType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
         Type* boolType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
         Type* returnType = nullptr;

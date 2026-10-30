@@ -107,20 +107,18 @@ TypeSpecifierNode* Parser::parseFunctionTypeSpec()
         return nullptr;
     }
 
-    // Consume the '->'.
-    if (expect(TokenType::cArrow, nullptr, true) == false)
+    // Without an arrow, the function has no return type.
+    TypeSpecifierNode* returnTypeSpecifier = nullptr;
+    if (tryConsume(TokenType::cArrow))
     {
-        return nullptr;
+        returnTypeSpecifier = parseReturnTypeSpec();
+        if (returnTypeSpecifier == nullptr)
+        {
+            return nullptr;
+        }
     }
 
-    // Parse the return type.
-    TypeSpecifierNode* returnTypeSpecifier = parseReturnTypeSpec();
-    if (returnTypeSpecifier == nullptr)
-    {
-        return nullptr;
-    }
-
-    SourceRange range{funToken.getRange().getStartLoc(), returnTypeSpecifier->mSourceRange.getEndLoc()};
+    SourceRange range = makeRangeToPrevious(funToken);
     return mCtx.create<FunctionTypeSpecifierNode>(range, makeArrayView(mCtx.mAllocator, params), returnTypeSpecifier);
 }
 

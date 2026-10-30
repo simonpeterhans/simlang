@@ -69,7 +69,7 @@ public:
 private:
     // Type state.
     Type* getErrorType() const;
-    bool isErrorType(Type* type) const;
+    bool isMissingOrErrorType(Type* type) const;
     void markError(ExpressionNode* expr) const;
     Type* requireNonNullType(Type* type, SourceRange range, const char* context) const;
     Type* requireValueType(Type* type, SourceRange range, const char* context) const;
@@ -91,7 +91,7 @@ private:
     bool isInitializerFieldAssignment(AssignmentStatementNode* node) const;
     bool requireAssignableLValue(ExpressionNode* expr, bool allowImmutable = false) const;
     bool requireBoolExpression(ExpressionNode* expr) const;
-    bool requireNonVoidPrimitive(ExpressionNode* expr) const;
+    bool requirePrintablePrimitive(ExpressionNode* expr) const;
     void diagnoseInvalidBinaryOperands(BinaryOpNode* node) const;
     void diagnoseInvalidAssignmentOperands(AssignmentStatementNode* node) const;
 

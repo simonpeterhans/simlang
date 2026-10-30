@@ -20,7 +20,7 @@ Type* SyscallRegistry::getSyscallType(CompilerContext& ctx, SyscallType type)
 {
     switch (type.mType)
     {
-        case NativeType::cVoid: return ctx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid);
+        case NativeType::cVoid: return ctx.mTypes.getVoidType();
         case NativeType::cInt: return ctx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
         case NativeType::cFloat: return ctx.mTypes.getPrimitiveType(PrimitiveTypeKind::cFloat);
         case NativeType::cBool: return ctx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
@@ -91,7 +91,7 @@ bool SyscallRegistry::registerSyscall(CompilerContext& ctx,
         return false;
     }
 
-    Type* returnType = tt.getPrimitiveType(PrimitiveTypeKind::cVoid);
+    Type* returnType = tt.getVoidType();
     if (returnTypes.size() == 1)
     {
         returnType = returnTypes.front();

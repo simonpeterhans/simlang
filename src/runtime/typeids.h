@@ -10,7 +10,6 @@ enum BuiltinTypeID : TypeID
 {
     cInvalidTypeID,
 
-    cVoidTypeID,
     cIntTypeID,
     cFloatTypeID,
     cBoolTypeID,

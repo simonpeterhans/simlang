@@ -46,7 +46,7 @@ bool CodeGenVisitor::emitLambdaBodies()
 
         // If we have void, emit the return manually.
         auto* functionType = static_cast<FunctionType*>(lambda->mSymbol->mType);
-        if (getPrimitiveKind(functionType->mReturnType) == PrimitiveTypeKind::cVoid)
+        if (functionType->mReturnType->mKind == TypeKind::cVoid)
         {
             emit<OpCode::cReturn>();
         }

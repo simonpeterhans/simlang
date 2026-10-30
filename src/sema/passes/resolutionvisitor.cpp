@@ -663,19 +663,25 @@ bool ResolutionVisitor::visitFunctionTypeSpecifier(FunctionTypeSpecifierNode* no
         params.push_back(FunctionParam{param.mTypeSpecifier->mType, param.mIsInOut});
     }
 
-    // Resolve the return type spec.
-    if (visit(node->mReturnTypeSpecifier) == false)
+    // Resolve the return type spec if we have one.
+    Type* returnType = mCtx.mTypes.getVoidType();
+    if (node->mReturnTypeSpecifier != nullptr)
     {
-        return false;
+        if (visit(node->mReturnTypeSpecifier) == false)
+        {
+            return false;
+        }
+
+        // Also check for success before adding the function type.
+        if (node->mReturnTypeSpecifier->mType == nullptr)
+        {
+            return true;
+        }
+
+        returnType = node->mReturnTypeSpecifier->mType;
     }
 
-    // Also check for success before adding the function type.
-    if (node->mReturnTypeSpecifier->mType == nullptr)
-    {
-        return true;
-    }
-
-    node->mType = mCtx.mTypes.getOrAddFunction(node->mReturnTypeSpecifier->mType, params);
+    node->mType = mCtx.mTypes.getOrAddFunction(returnType, params);
 
     return true;
 }

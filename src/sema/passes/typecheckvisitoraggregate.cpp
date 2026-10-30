@@ -82,7 +82,7 @@ bool TypeCheckVisitor::resolveImplementedInterfaces(TypeDeclarationStatementNode
 
         // If we resolved to an error, ignore it.
         Type* implInterfaceType = implInterface->mType;
-        if (isErrorType(implInterfaceType))
+        if (isMissingOrErrorType(implInterfaceType))
         {
             continue;
         }

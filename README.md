@@ -20,7 +20,7 @@ feature set of what I would ship in a real-world project (or keep in this implem
 
 ## Current Features
 
-- Primitives: `void`, `int`, `float`, `bool`, `string`
+- Primitives: `int`, `float`, `bool`, `string`
 - `struct` value types
 - `class` heap-reference types
 - `interface` declarations and dynamic interface dispatch
@@ -74,7 +74,7 @@ class Terrain
         this.tiles.reserve(width * height);
     }
 
-    fun addTile(x: int, y: int, tileHeight: int) -> void
+    fun addTile(x: int, y: int, tileHeight: int)
     {
         var pos = make Vec2 { x, y };
         var tile = make Tile { pos, height: tileHeight };
@@ -92,7 +92,7 @@ class Terrain
     }
 }
 
-fun main() -> void
+fun main()
 {
     // Assume game::cDefaultMapSize was registered by the host.
     const length = game::cDefaultMapSize;

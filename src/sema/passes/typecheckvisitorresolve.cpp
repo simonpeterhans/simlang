@@ -98,11 +98,10 @@ bool TypeCheckVisitor::resolveFunctionSignature(FunctionDeclarationStatementNode
         return true;
     }
 
-    // Return type.
-    // Initializers always return void.
-    Type* functionReturnType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cVoid);
+    // Initializers and functions with no return type always return void.
+    Type* functionReturnType = mCtx.mTypes.getVoidType();
     // For non-initializers, resolve and use the return type spec.
-    if (node->mIsInitMethod == false)
+    if (node->mIsInitMethod == false && node->mReturnTypeSpec != nullptr)
     {
         if (visit(node->mReturnTypeSpec) == false)
         {
@@ -127,7 +126,7 @@ bool TypeCheckVisitor::resolveFunctionSignature(FunctionDeclarationStatementNode
 
         auto* paramDecl = static_cast<ParamDeclarationNode*>(param);
         Type* paramType = paramDecl->mSymbol->mType;
-        if (isErrorType(paramType))
+        if (isMissingOrErrorType(paramType))
         {
             paramType = getErrorType();
         }
