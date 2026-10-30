@@ -108,7 +108,7 @@ std::string typeToString(Type* type)
                 s += typeToString(param.mType);
             }
 
-            s += ") : ";
+            s += ") -> ";
             s += typeToString(f->mReturnType);
             return s;
         }

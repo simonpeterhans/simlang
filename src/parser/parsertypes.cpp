@@ -107,8 +107,8 @@ TypeSpecifierNode* Parser::parseFunctionTypeSpec()
         return nullptr;
     }
 
-    // Consume the ':'.
-    if (expect(TokenType::cColon, nullptr, true) == false)
+    // Consume the '->'.
+    if (expect(TokenType::cArrow, nullptr, true) == false)
     {
         return nullptr;
     }

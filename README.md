@@ -74,7 +74,7 @@ class Terrain
         this.tiles.reserve(width * height);
     }
 
-    fun addTile(x: int, y: int, tileHeight: int) : void
+    fun addTile(x: int, y: int, tileHeight: int) -> void
     {
         var pos = make Vec2 { x, y };
         var tile = make Tile { pos, height: tileHeight };
@@ -86,13 +86,13 @@ class Terrain
         }
     }
 
-    fun getStats() : (int, int)
+    fun getStats() -> (int, int)
     {
         return tiles.size(), peak;
     }
 }
 
-fun main() : void
+fun main() -> void
 {
     // Assume game::cDefaultMapSize was registered by the host.
     const length = game::cDefaultMapSize;
@@ -110,7 +110,7 @@ fun main() : void
 
     // Lambdas implicitly capture surrounding locals by value.
     var capturedOffset = 1;
-    var addOffset = fun(value: int) : int
+    var addOffset = fun(value: int) -> int
     {
         return value + capturedOffset;
     };

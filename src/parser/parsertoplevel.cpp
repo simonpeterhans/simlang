@@ -172,7 +172,7 @@ StatementNode* Parser::parseFunctionDeclaration()
         return nullptr;
     }
 
-    if (expect(TokenType::cColon, nullptr, true) == false)
+    if (expect(TokenType::cArrow, nullptr, true) == false)
     {
         return nullptr;
     }
