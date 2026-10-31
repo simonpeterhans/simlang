@@ -24,19 +24,19 @@ static u64 getListPayloadWords(u32 elementWords, u32 capacity)
     return static_cast<u64>(elementWords) * capacity;
 }
 
-static u32 getMapBucketWords(u32 valueWords)
+static u32 getMapBucketWords(u32 keyWords, u32 valueWords)
 {
-    return cMapControlWords + cMapKeyWords + valueWords;
+    return cMapControlWords + keyWords + valueWords;
 }
 
-static u64 getMapPayloadWords(u32 valueWords, u32 usedCapacity)
+static u64 getMapPayloadWords(u32 keyWords, u32 valueWords, u32 usedCapacity)
 {
     // Get the total number of buckets we need for the requested entry capacity.
     // As of now, that is basically 2 times the number of entries that we want to use.
-    u64 bucketCapacity = std::max(static_cast<u64>(usedCapacity * 2U), cMinMapBucketCapacity);
+    u64 bucketCapacity = std::max(static_cast<u64>(usedCapacity) * 2U, cMinMapBucketCapacity);
 
     // Get the size of each bucket in words (control + key + value words).
-    u64 bucketWords = getMapBucketWords(valueWords);
+    u64 bucketWords = getMapBucketWords(keyWords, valueWords);
 
     return bucketCapacity * bucketWords;
 }
@@ -172,19 +172,14 @@ bool Heap::resizeList(VMWord handle, u32 capacity, const RootProvider& roots)
     return true;
 }
 
-Heap::MapAlloc Heap::allocateMap(TypeID keyTypeID,
-                                 TypeID valueTypeID,
-                                 u32 valueWords,
-                                 u32 capacity,
-                                 const RootProvider& roots)
+Heap::MapAlloc Heap::allocateMap(TypeID keyTypeID, TypeID valueTypeID, u32 capacity, const RootProvider& roots)
 {
-    // We need 1 data word for GC stuff.
-    valueWords = std::max(valueWords, 1U);
-
-    u64 payloadWords = getMapPayloadWords(valueWords, capacity);
+    u32 keyWords = mTypeLayoutTable->getLayout(keyTypeID).getSizeAsValue();
+    u32 valueWords = mTypeLayoutTable->getLayout(valueTypeID).getSizeAsValue();
+    u64 payloadWords = getMapPayloadWords(keyWords, valueWords, capacity);
 
     // Allocate stuff.
-    HeapIndex base = alloc(BlockType::cMap, keyTypeID, payloadWords, 0, valueWords, roots, true, valueTypeID);
+    HeapIndex base = alloc(BlockType::cMap, keyTypeID, payloadWords, 0, 0, roots, true, valueTypeID);
     if (base == cInvalidHeapIndex)
     {
         return {};
@@ -199,7 +194,7 @@ Heap::MapAlloc Heap::allocateMap(TypeID keyTypeID,
 
     MapAlloc ret;
     ret.mRef = ref;
-    ret.mBlock = MapBlock{&headerFromBase(base), payloadFromBase(base)};
+    ret.mBlock = makeMapBlock(base);
     return ret;
 }
 
@@ -214,9 +209,10 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
 
     // Copy the fields needed after allocation, since allocation may invalidate block pointers.
     u32 oldLength = oldBlock.mHeader->mLength;
-    TypeID keyTypeID = oldBlock.mHeader->mTypeID;
+    TypeID keyTypeID = oldBlock.mHeader->getMapKeyTypeID();
     TypeID valueTypeID = oldBlock.mHeader->getMapValueTypeID();
-    u32 valueWords = oldBlock.mHeader->getMapValueWords();
+    u32 valueWords = oldBlock.getValueWords();
+    u32 keyWords = oldBlock.getKeyWords();
 
     // No shrinking, require at least as many elements as we had before for now.
     capacity = std::max(capacity, oldLength);
@@ -227,11 +223,10 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
         return true;
     }
 
-    u64 payloadWords = getMapPayloadWords(valueWords, capacity);
+    u64 payloadWords = getMapPayloadWords(keyWords, valueWords, capacity);
 
     // Create the new block with the desired capacity and the old length, and zero everything.
-    HeapIndex newBase =
-        alloc(BlockType::cMap, keyTypeID, payloadWords, oldLength, valueWords, roots, true, valueTypeID);
+    HeapIndex newBase = alloc(BlockType::cMap, keyTypeID, payloadWords, oldLength, 0, roots, true, valueTypeID);
     if (newBase == cInvalidHeapIndex)
     {
         return false;
@@ -240,8 +235,8 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
     // If we have some old data, rehash it into the new bucket array.
     if (oldLength != 0)
     {
-        oldBlock = MapBlock{&headerFromBase(oldBase), payloadFromBase(oldBase)};
-        MapBlock newBlock{&headerFromBase(newBase), payloadFromBase(newBase)};
+        oldBlock = makeMapBlock(oldBase);
+        MapBlock newBlock = makeMapBlock(newBase);
         oldBlock.copyOccupiedBucketsTo(newBlock);
     }
 
@@ -367,9 +362,20 @@ bool Heap::resolveMapHandle(VMWord handle, HeapIndex& outBase, MapBlock& out)
 
     // Make a map block view out of it.
     outBase = base;
-    out = MapBlock{&header, payloadFromBase(base)};
+    out = makeMapBlock(base);
 
     return true;
+}
+
+MapBlock Heap::makeMapBlock(HeapIndex base)
+{
+    // For a map block, we need the start of the header and the start of the payload.
+    BlockHeader& header = headerFromBase(base);
+    VMWord* payload = payloadFromBase(base);
+    // Cache the key and value widths from their type layouts.
+    TypeLayoutWordCount keyWords = mTypeLayoutTable->getLayout(header.getMapKeyTypeID()).getSizeAsValue();
+    TypeLayoutWordCount valueWords = mTypeLayoutTable->getLayout(header.getMapValueTypeID()).getSizeAsValue();
+    return MapBlock{&header, payload, keyWords, valueWords};
 }
 
 void Heap::collect(const Roots& roots)
@@ -656,7 +662,7 @@ void Heap::writeHeader(HeapIndex base,
 
     BlockHeader& h = headerFromBase(base);
     h.mBlockType = t;
-    h.mTypeID = typeID;
+    h.mTypeID = t == BlockType::cMap ? 0 : typeID;
     h.mSize = totalWords;
     h.mLength = length;
     h.mMarked = false;
@@ -669,7 +675,7 @@ void Heap::writeHeader(HeapIndex base,
         }
         case BlockType::cMap:
         {
-            h.setMapValueInfo(elementWords, mapValueTypeID);
+            h.setMapTypeIDs(typeID, mapValueTypeID);
             break;
         }
         default:
@@ -899,69 +905,59 @@ void Heap::scanBlockPrecise(HeapIndex base)
 
     if (header.mBlockType == BlockType::cMap)
     {
-        MapBlock map{&header, payload};
-        const u32 len = header.mLength;
-        if (len == 0)
+        if (header.mLength == 0)
         {
             return;
         }
 
-        // If we have strings or classes as keys, we need to mark them.
-        const TypeLayout& keyLayout = mTypeLayoutTable->getLayout(header.mTypeID);
-        bool markReferenceKeys = (keyLayout.getKind() == TypeLayout::Kind::cReference);
-        bool markReferenceValue = false;
-        bool markStructValueRefs = false;
-        TypeLayoutRefCount refCount = 0;
-        TypeLayoutRefOffsetIndex refOffsetStart = 0;
+        MapBlock map = makeMapBlock(base);
 
-        TypeID valueTypeID = header.getMapValueTypeID();
+        const TypeLayout& keyLayout = mTypeLayoutTable->getLayout(header.getMapKeyTypeID());
+        const TypeLayout& valueLayout = mTypeLayoutTable->getLayout(header.getMapValueTypeID());
+        bool keyReference = keyLayout.getKind() == TypeLayout::Kind::cReference;
+        bool valueReference = valueLayout.getKind() == TypeLayout::Kind::cReference;
 
-        const TypeLayout& ti = mTypeLayoutTable->getLayout(valueTypeID);
-        if (ti.getKind() == TypeLayout::Kind::cReference)
-        {
-            // We have a reference type as the value type.
-            markReferenceValue = true;
-        }
-        else
-        {
-            // We have a struct type as the value type, so we need to check if it has any references to follow.
-            refCount = ti.getRefCount();
-            refOffsetStart = ti.getRefOffsetStartIndex();
-            markStructValueRefs = refCount != 0 && mTypeLayoutTable->hasRefOffsetRange(refOffsetStart, refCount);
-        }
+        TypeLayoutRefCount keyRefCount = keyLayout.getRefCount();
+        TypeLayoutRefCount valueRefCount = valueLayout.getRefCount();
+        TypeLayoutRefOffsetIndex keyRefStart = keyLayout.getRefOffsetStartIndex();
+        TypeLayoutRefOffsetIndex valueRefStart = valueLayout.getRefOffsetStartIndex();
 
         // If we have nothing to mark at all, bail.
-        if (markReferenceKeys == false && markReferenceValue == false && markStructValueRefs == false)
+        if (keyReference == false && valueReference == false && keyRefCount == 0 && valueRefCount == 0)
         {
             return;
         }
 
-        // Otherwise, go over all buckets that are marked.
+        // Since we now allow struct keys, we can treat keys and values the same.
+        // Go over all buckets and mark all references.
         map.forEachOccupiedBucket(
-            [&](u32 index, const VMWord* bucket)
+            [&](u32 index, const VMWord*)
             {
-                // If we have a reference, mark the key (index 0 is the control, index 1 the key).
-                if (markReferenceKeys)
+                const VMWord* key = map.getKey(index);
+                if (keyReference)
                 {
-                    markValue(bucket[1]);
+                    markValue(key[0]);
                 }
-
-                // If we have a reference value, mark it.
-                if (markReferenceValue)
+                else
                 {
-                    markValue(*map.getValue(index));
-                    return;
-                }
-
-                // If we have a struct value, go over all refs if holds and mark them.
-                if (markStructValueRefs)
-                {
-                    const VMWord* valueBase = map.getValue(index);
-                    for (u32 i = 0; i < refCount; ++i)
+                    for (u32 i = 0; i < keyRefCount; ++i)
                     {
-                        // Like for lists, we look up the offset in the layout table.
-                        TypeLayoutRefOffset offset = mTypeLayoutTable->getRefOffset(refOffsetStart + i);
-                        markValue(valueBase[offset]);
+                        TypeLayoutRefOffset offset = mTypeLayoutTable->getRefOffset(keyRefStart + i);
+                        markValue(key[offset]);
+                    }
+                }
+
+                const VMWord* value = map.getValue(index);
+                if (valueReference)
+                {
+                    markValue(value[0]);
+                }
+                else
+                {
+                    for (u32 i = 0; i < valueRefCount; ++i)
+                    {
+                        TypeLayoutRefOffset offset = mTypeLayoutTable->getRefOffset(valueRefStart + i);
+                        markValue(value[offset]);
                     }
                 }
             });

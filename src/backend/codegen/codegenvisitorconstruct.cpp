@@ -1,7 +1,9 @@
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/stmtnodes.h"
+#include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/typeidutils.h"
+#include "driver/compilercontext.h"
 #include "runtime/op/opcode.h"
 #include "runtime/vmdefines.h"
 #include "symbol/symbol.h"
@@ -11,7 +13,7 @@
 namespace simlang
 {
 
-bool CodeGenVisitor::emitNewList(NewObjectNode*, ListType* listType)
+bool CodeGenVisitor::emitNewList(ListType* listType)
 {
     // Get the element type.
     TypeID elementTypeID;
@@ -26,8 +28,11 @@ bool CodeGenVisitor::emitNewList(NewObjectNode*, ListType* listType)
     return true;
 }
 
-bool CodeGenVisitor::emitNewMap(NewObjectNode*, MapType* mapType)
+bool CodeGenVisitor::emitNewMap(MapType* mapType)
 {
+    // Register the key type so that we know how it can be accessed subsequently.
+    mCtx.mBackend.mKeyOpsTable.addType(mapType->mKey);
+
     // Get the k/v type pair.
     TypeID keyTypeID;
     TypeID valueTypeID;

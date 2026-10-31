@@ -134,7 +134,7 @@ bool CodeGenVisitor::emitStructReceiverAddress(ExpressionNode* expr)
     // Emit the map or list reference.
     if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
     {
-        emit<OpCode::cRefMapValue>();
+        emit<OpCode::cRefMapValue>(getMapAccessIndex(static_cast<MapType*>(index->mReceiver->mResolvedType), 0, 0));
     }
     else
     {
@@ -151,7 +151,8 @@ void CodeGenVisitor::emitIndexedFieldLoad(IndexCallNode* index, FieldOffset offs
 {
     if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
     {
-        emit<OpCode::cLoadMapValueField>(offset, words);
+        emit<OpCode::cLoadMapValueField>(
+            getMapAccessIndex(static_cast<MapType*>(index->mReceiver->mResolvedType), offset, words));
     }
     else
     {
@@ -163,7 +164,8 @@ void CodeGenVisitor::emitIndexedFieldStore(IndexCallNode* index, FieldOffset off
 {
     if (index->mReceiver->mResolvedType->mKind == TypeKind::cMap)
     {
-        emit<OpCode::cStoreMapValueField>(offset, words);
+        emit<OpCode::cStoreMapValueField>(
+            getMapAccessIndex(static_cast<MapType*>(index->mReceiver->mResolvedType), offset, words));
     }
     else
     {
@@ -707,7 +709,8 @@ bool CodeGenVisitor::tryEmitFusedLoadFromLValue(ExpressionNode* expr)
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(words));
+                emit<OpCode::cLoadMapValue>(
+                    getMapAccessIndex(static_cast<MapType*>(receiverType), 0, static_cast<OpWordCount>(words)));
             }
             else
             {
@@ -808,7 +811,8 @@ bool CodeGenVisitor::tryEmitFusedStoreIntoLValue(ExpressionNode* lhs, Expression
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(words));
+                emit<OpCode::cStoreMapValue>(
+                    getMapAccessIndex(static_cast<MapType*>(receiverType), 0, static_cast<OpWordCount>(words)));
             }
             else
             {
@@ -856,7 +860,8 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
 
                 // Keep the evaluated handle and index/key for the store after the RHS has run.
                 // The list/map have their handle as well as the index/key on the stack, so copy that.
-                emit<OpCode::cDupN>(static_cast<OpWordCount>(2));
+                u32 keyWords = layout::getWordSizeForType(index->mIndex->mResolvedType);
+                emit<OpCode::cDupN>(1U + keyWords);
                 // Load the index.
                 emitIndexedFieldLoad(index, indexedOffset, 1);
 
@@ -932,12 +937,13 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
             }
 
             // Here, we need to duplicate the receiver and index expressions since we need both for load and store.
-            emit<OpCode::cDupN>(static_cast<OpWordCount>(2));
+            u32 keyWords = layout::getWordSizeForType(index->mIndex->mResolvedType);
+            emit<OpCode::cDupN>(1U + keyWords);
 
             Type* receiverType = index->mReceiver->mResolvedType;
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(1));
+                emit<OpCode::cLoadMapValue>(getMapAccessIndex(static_cast<MapType*>(receiverType), 0, 1));
             }
             else
             {
@@ -952,7 +958,7 @@ bool CodeGenVisitor::tryEmitFusedCompoundAssignment(ExpressionNode* lhs, Express
 
             if (receiverType->mKind == TypeKind::cMap)
             {
-                emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(1));
+                emit<OpCode::cStoreMapValue>(getMapAccessIndex(static_cast<MapType*>(receiverType), 0, 1));
             }
             else
             {

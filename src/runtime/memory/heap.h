@@ -70,7 +70,7 @@ public:
     StringAlloc allocateString(u32 byteLen, const RootProvider& roots);
     ListAlloc allocateList(TypeID elemTypeID, u32 elemWords, u32 capacity, const RootProvider& roots);
     bool resizeList(VMWord handle, u32 capacity, const RootProvider& roots);
-    MapAlloc allocateMap(TypeID keyTypeID, TypeID valueTypeID, u32 valueWords, u32 capacity, const RootProvider& roots);
+    MapAlloc allocateMap(TypeID keyTypeID, TypeID valueTypeID, u32 capacity, const RootProvider& roots);
     bool resizeMap(VMWord handle, u32 capacity, const RootProvider& roots);
 
     bool resolvePayloadAddress(VMWord address, Block& out);
@@ -106,6 +106,7 @@ private:
     bool resolveHandleToBase(VMWord handle, HeapIndex& outBase) const;
     bool resolveListHandle(VMWord handle, HeapIndex& outBase, ListBlock& out);
     bool resolveMapHandle(VMWord handle, HeapIndex& outBase, MapBlock& out);
+    MapBlock makeMapBlock(HeapIndex base);
 
     HeapIndex alloc(BlockType t,
                     TypeID typeID,

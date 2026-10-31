@@ -18,9 +18,11 @@ ExecutableImage BackendState::toExecutableImage() &&
     image.mFunctionInfos = std::move(mFunctionInfos);
     image.mInterfaceMethods = std::move(mInterfaceMethods);
     image.mInterfaceCallInfos = std::move(mInterfaceCallInfos);
+    image.mMapAccessInfos = std::move(mMapAccessInfos);
     image.mSyscallInfos = std::move(mSyscallInfos);
 
     image.mTypeLayoutTable = std::move(mTypeLayoutTable).build();
+    image.mKeyOpsTable = std::move(mKeyOpsTable).build();
 
     image.mStrings = std::move(mStrings).build();
     image.mStringFormats = std::move(mStringFormats).build();

@@ -20,6 +20,7 @@ using LocalIdx         = u16;
 using StringLiteralIdx = u32;
 using StringFormatIdx  = u32;
 using TypeID           = u16;
+using MapAccessIdx     = u32;
 using FieldOffset      = u16;
 
 using OpWordCount              = u16;

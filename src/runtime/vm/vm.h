@@ -8,6 +8,7 @@
 #include "runtime/runtimeerror.h"
 #include "runtime/vm/vmstack.h"
 #include "runtime/vmdefines.h"
+#include "util/arrayview.h"
 #include "util/bitutils.h"
 #include "util/meta.h"
 #include "util/types.h"
@@ -18,6 +19,7 @@ namespace simlang
 class RuntimeErrorSink;
 class TextSink;
 struct ExecutableImage;
+struct KeyOps;
 
 class VM : Heap::RootProvider
 {
@@ -150,18 +152,23 @@ private:
     // Map validation/capacity helpers.
     bool getCheckedMapBlock(VMWord handle, MapBlock& out, VMAddress address);
     bool ensureMapCapacity(VMWord handle, MapBlock& block, u32 minCapacity, VMAddress address);
-    bool hashMapKey(TypeID keyTypeID, VMWord key, VMAddress address, u32& outHash);
-    bool mapKeysEqual(TypeID keyTypeID, VMWord lhs, VMWord rhs, VMAddress address, bool& out);
-    bool findMapEntry(const MapBlock& block, VMWord key, u32 hash, VMAddress address, u32& outIndex, bool& outFound);
+    bool hashMapKey(TypeID keyTypeID, const VMWord* key, VMAddress address, u32& outHash);
+    bool mapKeysEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out);
+    bool findMapEntry(const MapBlock& block,
+                      const VMWord* key,
+                      u32 hash,
+                      VMAddress address,
+                      u32& outIndex,
+                      bool& outFound);
 
     // Map operations used by syscalls.
     bool getMapSize(VMWord handle, u32& outSize);
     bool reserveMap(VMWord handle, u32 capacity);
     bool clearMap(VMWord handle);
-    bool containsMapKeyWord(VMWord handle, VMWord key, bool& out);
-    bool readMapValueWords(VMWord handle, VMWord key, VMWord* dst, u32 wordCount);
-    bool writeMapValueWords(VMWord handle, VMWord key, const VMWord* src, u32 wordCount);
-    bool removeMapKeyWord(VMWord handle, VMWord key, bool& outRemoved);
+    bool containsMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& out);
+    bool readMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayView<VMWord> dst);
+    bool writeMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayView<const VMWord> value);
+    bool removeMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& outRemoved);
 
     // String allocation used by syscalls.
     bool makeStringAlloc(std::string_view str, VMWord& outRef);

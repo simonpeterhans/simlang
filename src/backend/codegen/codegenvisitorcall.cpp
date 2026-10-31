@@ -1,16 +1,11 @@
-#include <vector>
-
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/nodetypes.h"
-#include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/layout/layout.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
-#include "runtime/callinfo.h"
 #include "runtime/op/opcode.h"
 #include "runtime/vmdefines.h"
-#include "source/sourcerange.h"
 #include "symbol/identifier.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
@@ -21,99 +16,6 @@
 
 namespace simlang
 {
-
-InterfaceCallIdx CodeGenVisitor::getInterfaceCallIndex(const SourceRange& range,
-                                                       InterfaceMethodSlot slot,
-                                                       OpWordCount argWords,
-                                                       ReturnWordCount returnWords)
-{
-    // Build the call index based on the slot, arg words, and return words.
-    // This can be reused by any interface call with the same params.
-    for (usize i = 0; i < mCtx.mBackend.mInterfaceCallInfos.size(); ++i)
-    {
-        const InterfaceCallInfo& info = mCtx.mBackend.mInterfaceCallInfos[i];
-        if (info.mSlot == slot && info.mArgWords == argWords && info.mReturnWords == returnWords)
-        {
-            return static_cast<InterfaceCallIdx>(i);
-        }
-    }
-
-    usize rawIndex = mCtx.mBackend.mInterfaceCallInfos.size();
-    if (rawIndex > cMaxValidInterfaceCallIdx)
-    {
-        mCtx.report<cTooManyInterfaceCalls>(range, rawIndex, cMaxValidInterfaceCallIdx);
-        return cInvalidInterfaceCallIdx;
-    }
-
-    // New one, build the info.
-    InterfaceCallInfo info;
-    info.mSlot = slot;
-    info.mArgWords = argWords;
-    info.mReturnWords = returnWords;
-
-    // Add it and return its index (previous size).
-    mCtx.mBackend.mInterfaceCallInfos.push_back(info);
-
-    return static_cast<InterfaceCallIdx>(rawIndex);
-}
-
-u32 CodeGenVisitor::getInterfaceTableIndex(AggregateType* aggregateType, InterfaceType* interfaceType)
-{
-    // We want to resolve the interface table index for the given interface type within the given aggregate type.
-    // Go over all interfaces the aggregate is implementing.
-    for (InterfaceImplementation& implementation : aggregateType->mInterfaces)
-    {
-        // If it's' not the interface we're looking for, bail.
-        if (implementation.mInterface != interfaceType)
-        {
-            continue;
-        }
-
-        // If we already set/resolved the index for this interface, return it.
-        if (implementation.mTableIndex != cInvalidInterfaceMethodTableIndex)
-        {
-            return implementation.mTableIndex;
-        }
-
-        std::vector<FunctionIdx> methods;
-        methods.reserve(interfaceType->mSymbol->mMembers.size());
-
-        // Otherwise, we have to resolve the index for this interface.
-        // Go over all interface members (which currently
-        for (Symbol* interfaceMember : interfaceType->mSymbol->mMembers)
-        {
-            Symbol* concreteMember = nullptr;
-            for (Symbol* member : aggregateType->mSymbol->mMembers)
-            {
-                // Find the member function with the same identifier as the interface member.
-                // We know it exists because sema checked that already.
-                if (member->mSymbolType == SymbolType::cMemberFunction &&
-                    member->mIdentifier == interfaceMember->mIdentifier)
-                {
-                    concreteMember = member;
-                    break;
-                }
-            }
-
-            // Add the aggregate method index to the methods for this interface implementation.
-            methods.push_back(static_cast<FunctionIdx>(concreteMember->mIndex));
-        }
-
-        // The table index points to where our interface method implementations start.
-        // That way, we can use the table index plus the interface method slot to lookup the function index.
-        implementation.mTableIndex = static_cast<u32>(mCtx.mBackend.mInterfaceMethods.size());
-
-        // Add all the indices to the interface method implementations.
-        for (FunctionIdx method : methods)
-        {
-            mCtx.mBackend.mInterfaceMethods.push_back(method);
-        }
-
-        return implementation.mTableIndex;
-    }
-
-    return cInvalidInterfaceMethodTableIndex;
-}
 
 bool CodeGenVisitor::emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType)
 {
@@ -381,7 +283,8 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cMapContainsKey>();
+        // Here, we are only interested in the key and so we don't have a value field offset or value words.
+        emit<OpCode::cMapContainsKey>(getMapAccessIndex(mapType, 0, 0));
         return true;
     }
 
@@ -392,7 +295,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cLoadMapValue>(static_cast<OpWordCount>(valueWords));
+        emit<OpCode::cLoadMapValue>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
         return true;
     }
 
@@ -404,7 +307,7 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cStoreMapValue>(static_cast<OpWordCount>(valueWords));
+        emit<OpCode::cStoreMapValue>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
         return true;
     }
 
@@ -415,7 +318,8 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
             return false;
         }
 
-        emit<OpCode::cMapRemove>();
+        // Here, we are only interested in the key and so we don't have a value field offset or value words.
+        emit<OpCode::cMapRemove>(getMapAccessIndex(mapType, 0, 0));
         return true;
     }
 

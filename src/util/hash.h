@@ -3,10 +3,13 @@
 #include <functional>
 #include <string_view>
 
+#include "util/bitutils.h"
 #include "util/types.h"
 
 namespace simlang
 {
+
+inline constexpr u32 cHashSeed32 = 2166136261U;
 
 inline u32 mixHash32(u32 value)
 {
@@ -19,13 +22,23 @@ inline u32 mixHash32(u32 value)
     return value;
 }
 
+inline void combineHash32(u32& hash, u32 component)
+{
+    hash ^= component;
+    hash *= 16777619U;
+}
+
+inline u32 hashFloat32(f32 value)
+{
+    return mixHash32(value == 0.0f ? 0U : bits::bitCast<u32>(value));
+}
+
 inline u32 hashBytes32(std::string_view bytes)
 {
-    u32 hash = 2166136261U;
+    u32 hash = cHashSeed32;
     for (char c : bytes)
     {
-        hash ^= static_cast<u8>(c);
-        hash *= 16777619U;
+        combineHash32(hash, static_cast<u8>(c));
     }
 
     return mixHash32(hash);

@@ -20,14 +20,14 @@ enum class BlockType : u8
 struct BlockHeader
 {
     static constexpr u32 cElementInfoWordCountMask = 0xFFFFU;
-    static constexpr u32 cElementInfoTypeIDShift = 16;
+    static constexpr u32 cMapValueTypeIDShift = 16;
 
     u32 mSize = 0;                           // 4b (Header AND data.)
-    TypeID mTypeID = 0;                      // 2b (For map<K, V> this is K.)
+    TypeID mTypeID = 0;                      // 2b (Object type OR list element type; unused for maps.)
     BlockType mBlockType = BlockType::cFree; // 1b
     bool mMarked = false;                    // 1b (Could also be flags, but we only need one as of now.)
     u32 mLength = 0;                         // 4b (List/map length OR string length.)
-    u32 mElementInfo = 0;                    // 4b (Element/value size (2b) and V type (2b) for maps.)
+    u32 mElementInfo = 0;                    // 4b (List element word count OR packed map K/V type IDs.)
 
     void clearElementInfo() { mElementInfo = 0; }
 
@@ -36,19 +36,17 @@ struct BlockHeader
     u32 getListElementWords() const { return mElementInfo & cElementInfoWordCountMask; }
     void setListElementInfo(u32 elementWords) { mElementInfo = elementWords & cElementInfoWordCountMask; }
 
-    // Maps use the element word count and value type ID.
+    // Maps store the key type ID in the low 16 bits and the value type ID in the high 16 bits.
 
-    u32 getMapValueWords() const { return mElementInfo & cElementInfoWordCountMask; }
-    TypeID getMapValueTypeID() const { return static_cast<TypeID>(mElementInfo >> cElementInfoTypeIDShift); }
-    void setMapValueInfo(u32 valueWords, TypeID valueTypeID)
+    TypeID getMapKeyTypeID() const { return static_cast<TypeID>(mElementInfo); }
+    TypeID getMapValueTypeID() const { return static_cast<TypeID>(mElementInfo >> cMapValueTypeIDShift); }
+    void setMapTypeIDs(TypeID keyTypeID, TypeID valueTypeID)
     {
-        mElementInfo =
-            (static_cast<u32>(valueTypeID) << cElementInfoTypeIDShift) | (valueWords & cElementInfoWordCountMask);
+        mElementInfo = keyTypeID | (static_cast<u32>(valueTypeID) << cMapValueTypeIDShift);
     }
 };
 
-static_assert(sizeof(BlockHeader) % sizeof(VMWord) == 0, "Heap block header is not aligned with VM word size!");
-static_assert(sizeof(TypeID) <= sizeof(u16), "Packed heap map value type ID expects a 16 bit TypeID.");
+static_assert(sizeof(BlockHeader) == 4 * sizeof(VMWord), "Heap block header must be four VM words!");
 
 inline constexpr u32 cBlockHeaderWords = sizeof(BlockHeader) / sizeof(VMWord);
 
@@ -137,18 +135,19 @@ inline constexpr VMWord cMapBucketEmpty = 0;
 inline constexpr VMWord cMapBucketOccupiedBit = 0x80000000U;
 inline constexpr VMWord cMapHashMask = 0x7FFFFFFFU;
 inline constexpr u32 cMapControlWords = 1;
-inline constexpr u32 cMapKeyWords = 1;
 
 struct MapBlock
 {
     BlockHeader* mHeader = nullptr;
     VMWord* mPayload = nullptr;
+    TypeLayoutWordCount mKeyWords = 0;
+    TypeLayoutWordCount mValueWords = 0;
 
-    // Bucket structure: [control, key, valueWord0, valueWord1, ..., valueWordN]
-    // We currently only have 1 word keys.
+    // Bucket structure: [control, complete key words, complete value words].
     // The control word stores the occupied bit plus the stored 31-bit key hash.
-    u32 getValueWords() const { return mHeader->getMapValueWords(); }
-    u32 getBucketWords() const { return cMapControlWords + cMapKeyWords + getValueWords(); }
+    u32 getKeyWords() const { return mKeyWords; }
+    u32 getValueWords() const { return mValueWords; }
+    u32 getBucketWords() const { return cMapControlWords + getKeyWords() + getValueWords(); }
 
     // The payload is the size of the block minus the header.
     u32 getPayloadWords() const { return mHeader->mSize - cBlockHeaderWords; }
@@ -161,18 +160,21 @@ struct MapBlock
     VMWord* getBucket(u32 index) { return mPayload + static_cast<usize>(index) * getBucketWords(); }
     const VMWord* getBucket(u32 index) const { return mPayload + static_cast<usize>(index) * getBucketWords(); }
 
-    VMWord* getValue(u32 index) { return getBucket(index) + cMapControlWords + cMapKeyWords; }
-    const VMWord* getValue(u32 index) const { return getBucket(index) + cMapControlWords + cMapKeyWords; }
+    VMWord* getKey(u32 index) { return getBucket(index) + cMapControlWords; }
+    const VMWord* getKey(u32 index) const { return getBucket(index) + cMapControlWords; }
+
+    VMWord* getValue(u32 index) { return getKey(index) + getKeyWords(); }
+    const VMWord* getValue(u32 index) const { return getKey(index) + getKeyWords(); }
 
     // Insert an entry into the bucket at the given index.
-    void insertEntry(u32 index, u32 hash, VMWord key)
+    void insertEntry(u32 index, u32 hash, const VMWord* key)
     {
         // Get the bucket at the given index.
         VMWord* bucket = getBucket(index);
         // The first word is the control word.
         bucket[0] = makeControl(hash);
-        // The second word is the hash (key).
-        bucket[1] = key;
+        // The complete key follows the control word.
+        std::memcpy(bucket + cMapControlWords, key, static_cast<usize>(getKeyWords()) * sizeof(VMWord));
         // We added a new entry.
         ++mHeader->mLength;
     }
@@ -312,7 +314,7 @@ struct MapBlock
             {
                 // If it does, compare the key with the comparator.
                 bool equal = false;
-                if (keyEqual(bucket[1], equal) == false)
+                if (keyEqual(bucket + cMapControlWords, equal) == false)
                 {
                     // If we're here, something went wrong in the comparison and we bail.
                     return false;

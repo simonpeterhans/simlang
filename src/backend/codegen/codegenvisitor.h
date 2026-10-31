@@ -155,12 +155,13 @@ private:
     bool emitBoolAsValue(ExpressionNode* expr);
     bool visitAsCondition(ExpressionNode* expr, u32 trueLabel, u32 falseLabel);
 
-    // Interface metadata.
+    // Runtime metadata.
     InterfaceCallIdx getInterfaceCallIndex(const SourceRange& range,
                                            InterfaceMethodSlot slot,
                                            OpWordCount argWords,
                                            ReturnWordCount returnWords);
     u32 getInterfaceTableIndex(AggregateType* aggregateType, InterfaceType* interfaceType);
+    MapAccessIdx getMapAccessIndex(MapType* mapType, FieldOffset valueFieldOffset, OpWordCount valueWords);
 
     // Call and interface emission.
     bool emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType);
@@ -173,8 +174,8 @@ private:
     bool emitIndirectFunctionCall(FunctionCallNode* node);
 
     // Object construction.
-    bool emitNewList(NewObjectNode* node, ListType* listType);
-    bool emitNewMap(NewObjectNode* node, MapType* mapType);
+    bool emitNewList(ListType* listType);
+    bool emitNewMap(MapType* mapType);
     bool emitNewClass(NewObjectNode* node, AggregateType* classType);
     bool emitNewStruct(NewObjectNode* node, AggregateType* structType);
 

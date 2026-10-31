@@ -48,7 +48,7 @@ static bool bodyEndsWithReturn(StatementNode* body)
            (block->mStatements.back()->mNodeType == NodeType::cReturnStatement);
 }
 
-static bool isSupportedListElementType(Type* type)
+static bool isSupportedCollectionValueType(Type* type)
 {
     if (type == nullptr)
     {
@@ -72,35 +72,6 @@ static bool isSupportedListElementType(Type* type)
             return false;
         }
     }
-}
-
-static bool isSupportedMapKeyType(Type* type)
-{
-    if (type == nullptr)
-    {
-        return false;
-    }
-
-    // Allow class keys.
-    if (type->mKind == TypeKind::cClass)
-    {
-        return true;
-    }
-
-    // If it's not a class, it has to be a primitive.
-    if (type->mKind != TypeKind::cPrimitive)
-    {
-        return false;
-    }
-
-    PrimitiveTypeKind kind = getPrimitiveKind(type);
-    return kind != PrimitiveTypeKind::cInvalid;
-}
-
-static bool isSupportedMapValueType(Type* type)
-{
-    // Currently the same as list types.
-    return isSupportedListElementType(type);
 }
 
 static bool isValidConstType(Type* type)
@@ -477,7 +448,7 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
         }
 
         // It also has to be usable as a list element type.
-        if (isSupportedListElementType(elementType) == false)
+        if (isSupportedCollectionValueType(elementType) == false)
         {
             mCtx.report<cInvalidTypeInContext>(node->mTypeArgs[0]->mSourceRange,
                                                typeToString(elementType),
@@ -500,7 +471,7 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
             return true;
         }
 
-        if (isSupportedMapKeyType(keyType) == false)
+        if (isSupportedCollectionValueType(keyType) == false)
         {
             mCtx.report<cInvalidTypeInContext>(node->mTypeArgs[0]->mSourceRange,
                                                typeToString(keyType),
@@ -509,7 +480,7 @@ bool TypeCheckVisitor::visitNamedTypeSpecifier(NamedTypeSpecifierNode* node)
             return true;
         }
 
-        if (isSupportedMapValueType(valueType) == false)
+        if (isSupportedCollectionValueType(valueType) == false)
         {
             mCtx.report<cInvalidTypeInContext>(node->mTypeArgs[1]->mSourceRange,
                                                typeToString(valueType),

@@ -47,6 +47,8 @@ target_sources(simlang PRIVATE
         backend/layout/aggregatelayoutvisitor.h
         backend/layout/constdatalayoutvisitor.cpp
         backend/layout/constdatalayoutvisitor.h
+        backend/layout/keyopstablebuilder.cpp
+        backend/layout/keyopstablebuilder.h
         backend/layout/layout.cpp
         backend/layout/layout.h
         backend/layout/symbollayoutvisitor.cpp
@@ -98,9 +100,11 @@ target_sources(simlang PRIVATE
         parser/tokentypes.def
         runtime/callinfo.h
         runtime/executableimage.h
+        runtime/mapaccess.h
         runtime/memory/heapblock.h
         runtime/memory/heap.cpp
         runtime/memory/heap.h
+        runtime/memory/keyopstable.h
         runtime/memory/typelayout.h
         runtime/memory/typelayouttable.h
         runtime/op/op.h

@@ -685,22 +685,24 @@ bool VMMapRef<K, V>::clear()
 template <typename K, typename V>
 bool VMMapRef<K, V>::containsKey(K key) const
 {
-    VMWord keyWord{};
-    if (SyscallValue<K>::write(*mVM, &keyWord, key) == false)
+    using Key = SyscallValue<K>;
+    VMWord keyWords[Key::cWordCount]{};
+    if (Key::write(*mVM, keyWords, key) == false)
     {
         return false;
     }
 
     bool found = false;
-    mVM->containsMapKeyWord(mHandle, keyWord, found);
+    mVM->containsMapKeyWords(mHandle, ArrayView<const VMWord>{keyWords, Key::cWordCount}, found);
     return found;
 }
 
 template <typename K, typename V>
 bool VMMapRef<K, V>::get(K key, V& out) const
 {
-    VMWord keyWord{};
-    if (SyscallValue<K>::write(*mVM, &keyWord, key) == false)
+    using Key = SyscallValue<K>;
+    VMWord keyWords[Key::cWordCount]{};
+    if (Key::write(*mVM, keyWords, key) == false)
     {
         return false;
     }
@@ -708,7 +710,9 @@ bool VMMapRef<K, V>::get(K key, V& out) const
     using Value = SyscallValue<V>;
 
     VMWord words[Value::cWordCount]{};
-    if (mVM->readMapValueWords(mHandle, keyWord, words, Value::cWordCount) == false)
+    if (mVM->readMapValueWords(mHandle,
+                               ArrayView<const VMWord>{keyWords, Key::cWordCount},
+                               ArrayView<VMWord>{words, Value::cWordCount}) == false)
     {
         return false;
     }
@@ -727,8 +731,9 @@ V VMMapRef<K, V>::get(K key) const
 template <typename K, typename V>
 bool VMMapRef<K, V>::set(K key, V value)
 {
-    VMWord keyWord{};
-    if (SyscallValue<K>::write(*mVM, &keyWord, key) == false)
+    using Key = SyscallValue<K>;
+    VMWord keyWords[Key::cWordCount]{};
+    if (Key::write(*mVM, keyWords, key) == false)
     {
         return false;
     }
@@ -741,20 +746,23 @@ bool VMMapRef<K, V>::set(K key, V value)
         return false;
     }
 
-    return mVM->writeMapValueWords(mHandle, keyWord, valueWords, Value::cWordCount);
+    return mVM->writeMapValueWords(mHandle,
+                                   ArrayView<const VMWord>{keyWords, Key::cWordCount},
+                                   ArrayView<const VMWord>{valueWords, Value::cWordCount});
 }
 
 template <typename K, typename V>
 bool VMMapRef<K, V>::remove(K key)
 {
-    VMWord keyWord{};
-    if (SyscallValue<K>::write(*mVM, &keyWord, key) == false)
+    using Key = SyscallValue<K>;
+    VMWord keyWords[Key::cWordCount]{};
+    if (Key::write(*mVM, keyWords, key) == false)
     {
         return false;
     }
 
     bool removed = false;
-    mVM->removeMapKeyWord(mHandle, keyWord, removed);
+    mVM->removeMapKeyWords(mHandle, ArrayView<const VMWord>{keyWords, Key::cWordCount}, removed);
     return removed;
 }
 
@@ -815,10 +823,12 @@ bool SyscallMapResult<K, V>::make(VM& vm, const std::vector<VMMapEntry<K, V>>& e
     {
         usize entryRootBase = vm.mTempRoots.size();
 
-        VMWord keyWord{};
+        VMWord keyWords[Key::cWordCount]{};
         VMWord valueWords[Value::cWordCount]{};
-        if (writeResultValue(entry.mKey, &keyWord) == false || writeResultValue(entry.mValue, valueWords) == false ||
-            vm.writeMapValueWords(outRef, keyWord, valueWords, Value::cWordCount) == false)
+        if (writeResultValue(entry.mKey, keyWords) == false || writeResultValue(entry.mValue, valueWords) == false ||
+            vm.writeMapValueWords(outRef,
+                                  ArrayView<const VMWord>{keyWords, Key::cWordCount},
+                                  ArrayView<const VMWord>{valueWords, Value::cWordCount}) == false)
         {
             outRef = cNullRef;
             return false;

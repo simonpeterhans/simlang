@@ -3,6 +3,8 @@
 #include <vector>
 
 #include "runtime/callinfo.h"
+#include "runtime/mapaccess.h"
+#include "runtime/memory/keyopstable.h"
 #include "runtime/memory/typelayouttable.h"
 #include "runtime/runtimedebuginfo.h"
 #include "runtime/stringdata.h"
@@ -20,9 +22,11 @@ struct ExecutableImage
     std::vector<FunctionInfo> mFunctionInfos;
     std::vector<FunctionIdx> mInterfaceMethods;
     std::vector<InterfaceCallInfo> mInterfaceCallInfos;
+    std::vector<MapAccessInfo> mMapAccessInfos;
     std::vector<SyscallEntry> mSyscallInfos;
 
     TypeLayoutTable mTypeLayoutTable;
+    KeyOpsTable mKeyOpsTable;
 
     StringPool mStrings;
     std::vector<StringFormatTemplate> mStringFormats;

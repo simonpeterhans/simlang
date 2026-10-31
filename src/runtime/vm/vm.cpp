@@ -10,6 +10,7 @@
 
 #include "runtime/callinfo.h"
 #include "runtime/executableimage.h"
+#include "runtime/memory/keyopstable.h"
 #include "runtime/memory/typelayout.h"
 #include "runtime/memory/typelayouttable.h"
 #include "runtime/op/opcode.h"
@@ -366,10 +367,7 @@ bool VM::makeMapRef(TypeID keyTypeID, TypeID valueTypeID, u32 capacity, VMWord& 
     // Note that this doesn't push the created map onto the ToS -- the caller should do that.
     outRef = cNullRef;
 
-    const TypeLayout& valueLayout = mImage.mTypeLayoutTable.getLayout(valueTypeID);
-    u32 valueWords = valueLayout.getSizeAsValue();
-
-    Heap::MapAlloc alloc = mHeap.allocateMap(keyTypeID, valueTypeID, valueWords, capacity, *this);
+    Heap::MapAlloc alloc = mHeap.allocateMap(keyTypeID, valueTypeID, capacity, *this);
     if (alloc.mRef == cNullRef)
     {
         reportRuntimeError(cInvalidVMAddress, RuntimeErrorKind::cAllocationFailed, toRuntimeErrorValue(capacity));
@@ -640,71 +638,286 @@ bool VM::ensureMapCapacity(VMWord handle, MapBlock& block, u32 minCapacity, VMAd
     return true;
 }
 
-bool VM::hashMapKey(TypeID keyTypeID, VMWord key, VMAddress address, u32& outHash)
+bool VM::hashMapKey(TypeID keyTypeID, const VMWord* key, VMAddress address, u32& outHash)
 {
     outHash = 0;
 
-    if (keyTypeID == cStringTypeID)
+    auto hashString = [&](VMWord word, u32& hash) -> bool
     {
         // If we have a string as key, get the string first.
         std::string_view value;
-        if (getCheckedStringView(key, value, address) == false)
+        if (getCheckedStringView(word, value, address) == false)
         {
             return false;
         }
-
-        // Hash it.
-        outHash = hashBytes32(value) & cMapHashMask;
-
+        hash = hashBytes32(value);
         return true;
-    }
+    };
 
-    if (keyTypeID == cFloatTypeID)
+    // Check if we have a builtin type, in which case we can do simple stuff.
+    switch (keyTypeID)
     {
-        // If we have a float, reinterpret the bytes as such and hash them.
-        f32 value = bits::bitCast<f32>(key);
-        outHash = mixHash32(value == 0.0f ? 0U : key) & cMapHashMask;
-        return true;
+        case cIntTypeID:
+        case cBoolTypeID:
+        case cListTypeID:
+        case cMapTypeID:
+        {
+            outHash = mixHash32(key[0]) & cMapHashMask;
+            return true;
+        }
+        case cFloatTypeID:
+        {
+            outHash = hashFloat32(bits::bitCast<f32>(key[0])) & cMapHashMask;
+            return true;
+        }
+        case cStringTypeID:
+        {
+            if (hashString(key[0], outHash) == false)
+            {
+                return false;
+            }
+            outHash &= cMapHashMask;
+            return true;
+        }
+        default:
+        {
+            break;
+        }
     }
 
-    // Int, bool, and class comparison goes through the value.
-    outHash = mixHash32(key) & cMapHashMask;
+    // Otherwise, we have a struct or class and have to look up how we can actually hash it.
+    const KeyOps& ops = mImage.mKeyOpsTable.getOps(keyTypeID);
+    if (ops.mOpCount == 1)
+    {
+        // If we only have 1 member with 1 word OR if this is a class/interface, we can also do simple stuff.
+        const KeyOp& op = mImage.mKeyOpsTable.getOp(ops.mFirstOp);
+        if (op.mWordCount == 1)
+        {
+            VMWord word = key[op.mOffset];
+            switch (op.mKind)
+            {
+                case KeyOpKind::cWordSpan:
+                {
+                    outHash = mixHash32(word);
+                    break;
+                }
+                case KeyOpKind::cFloat:
+                {
+                    outHash = hashFloat32(bits::bitCast<f32>(word));
+                    break;
+                }
+                case KeyOpKind::cString:
+                {
+                    if (hashString(word, outHash) == false)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+            }
+            outHash &= cMapHashMask;
+            return true;
+        }
+    }
 
+    // If we're here, the key is a struct or a function pointer (which has the entry token and context ref, so 2 words).
+    u32 hash = cHashSeed32;
+    for (u32 i = 0; i < ops.mOpCount; ++i)
+    {
+        // Get the operation so we know what we have  to do.
+        const KeyOp& op = mImage.mKeyOpsTable.getOp(ops.mFirstOp + i);
+        // Then, also get the relevant field (data) based on the op offset from the key ptr.
+        const VMWord* field = key + op.mOffset;
+        switch (op.mKind)
+        {
+            case KeyOpKind::cWordSpan:
+            {
+                // Hash every word of the span.
+                for (u32 word = 0; word < op.mWordCount; ++word)
+                {
+                    combineHash32(hash, mixHash32(field[word]));
+                }
+                break;
+            }
+            case KeyOpKind::cFloat:
+            {
+                // Reinterpret and hash as float.
+                combineHash32(hash, hashFloat32(bits::bitCast<f32>(*field)));
+                break;
+            }
+            case KeyOpKind::cString:
+            {
+                // Hash the string.
+                u32 componentHash = 0;
+                if (hashString(*field, componentHash) == false)
+                {
+                    return false;
+                }
+                combineHash32(hash, componentHash);
+                break;
+            }
+        }
+    }
+    outHash = mixHash32(hash) & cMapHashMask;
     return true;
 }
 
-bool VM::mapKeysEqual(TypeID keyTypeID, VMWord lhs, VMWord rhs, VMAddress address, bool& out)
+bool VM::mapKeysEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out)
 {
+    // Here, we compare the keys for equality.
     out = false;
 
-    // String key.
-    if (keyTypeID == cStringTypeID)
+    // Go over all the operations that we have.
+    for (u32 i = 0; i < ops.mOpCount; ++i)
     {
-        return stringsEqualChecked(lhs, rhs, address, out);
+        const KeyOp& op = mImage.mKeyOpsTable.getOp(ops.mFirstOp + i);
+        const VMWord* lhsField = lhs + op.mOffset;
+        const VMWord* rhsField = rhs + op.mOffset;
+        bool equal = false;
+
+        switch (op.mKind)
+        {
+            case KeyOpKind::cWordSpan:
+            {
+                // If we have a word span, we can directly compare the words.
+                equal = cmpWords(lhsField, rhsField, op.mWordCount);
+                break;
+            }
+            case KeyOpKind::cFloat:
+            {
+                // If we have a float, reinterpret that and compare the bits.
+                equal = bits::bitCast<f32>(*lhsField) == bits::bitCast<f32>(*rhsField);
+                break;
+            }
+            case KeyOpKind::cString:
+            {
+                // Strings require a bit more effort to be checked since we're comparing the values.
+                if (stringsEqualChecked(*lhsField, *rhsField, address, equal) == false)
+                {
+                    return false;
+                }
+                break;
+            }
+        }
+
+        // If any one comparison failed, we're done already (out is the final result).
+        if (equal == false)
+        {
+            return true;
+        }
     }
 
-    // Float key.
-    if (keyTypeID == cFloatTypeID)
-    {
-        out = bits::bitCast<f32>(lhs) == bits::bitCast<f32>(rhs);
-        return true;
-    }
-
-    // Int, bool, and class comparison goes through the value.
-    out = (lhs == rhs);
+    // If we're here, everything matched and the keys are equal.
+    out = true;
 
     return true;
 }
 
-bool VM::findMapEntry(const MapBlock& block, VMWord key, u32 hash, VMAddress address, u32& outIndex, bool& outFound)
+bool VM::findMapEntry(const MapBlock& block,
+                      const VMWord* key,
+                      u32 hash,
+                      VMAddress address,
+                      u32& outIndex,
+                      bool& outFound)
 {
-    // Simple wrapper around the map block's findEntry.
-    // We pass in our key equal function as comparator.
+    // Simple comparators if possible rather than dispatching on every candidate.
+    auto findWords = [&](u32 offset, u32 wordCount) -> bool
+    {
+        if (wordCount == 1)
+        {
+            return block.findEntry(
+                hash,
+                [&](const VMWord* entryKey, bool& equal)
+                {
+                    // Shortcut to compare the words directly (without memcmp) if we only have 1 word.
+                    equal = entryKey[offset] == key[offset];
+                    return true;
+                },
+                outIndex,
+                outFound);
+        }
+
+        return block.findEntry(
+            hash,
+            [&](const VMWord* entryKey, bool& equal)
+            {
+                // Compare all the words.
+                equal = cmpWords(entryKey + offset, key + offset, wordCount);
+                return true;
+            },
+            outIndex,
+            outFound);
+    };
+    auto findFloat = [&](u32 offset) -> bool
+    {
+        return block.findEntry(
+            hash,
+            [&](const VMWord* entryKey, bool& equal)
+            {
+                // Reinterpret as float, then compare.
+                equal = bits::bitCast<f32>(entryKey[offset]) == bits::bitCast<f32>(key[offset]);
+                return true;
+            },
+            outIndex,
+            outFound);
+    };
+    auto findString = [&](u32 offset) -> bool
+    {
+        return block.findEntry(
+            hash,
+            [&](const VMWord* entryKey, bool& equal)
+            {
+                // Compare strings by content.
+                return stringsEqualChecked(entryKey[offset], key[offset], address, equal);
+            },
+            outIndex,
+            outFound);
+    };
+
+    // If we do not have a user-defined type, do simple stuff once again.
+    TypeID keyTypeID = block.mHeader->getMapKeyTypeID();
+    switch (keyTypeID)
+    {
+        case cIntTypeID:
+        case cBoolTypeID:
+        case cListTypeID:
+        case cMapTypeID:
+        {
+            return findWords(0, 1);
+        }
+        case cFloatTypeID:
+        {
+            return findFloat(0);
+        }
+        case cStringTypeID:
+        {
+            return findString(0);
+        }
+        default:
+        {
+            break;
+        }
+    }
+
+    // Otherwise, if we only have 1 op (e.g. struct with 1 member or a class) also shortcut.
+    const KeyOps& ops = mImage.mKeyOpsTable.getOps(keyTypeID);
+    if (ops.mOpCount == 1)
+    {
+        const KeyOp& op = mImage.mKeyOpsTable.getOp(ops.mFirstOp);
+        switch (op.mKind)
+        {
+            case KeyOpKind::cWordSpan: return findWords(op.mOffset, op.mWordCount);
+            case KeyOpKind::cFloat: return findFloat(op.mOffset);
+            case KeyOpKind::cString: return findString(op.mOffset);
+        }
+    }
+
+    // Otherwise, if we have a struct or function pointer, compare the entire thing based on the ops we have.
     return block.findEntry(
         hash,
-        [&](VMWord entryKey, bool& equal)
+        [&](const VMWord* entryKey, bool& equal)
         {
-            return mapKeysEqual(block.mHeader->mTypeID, entryKey, key, address, equal);
+            return mapKeysEqual(ops, entryKey, key, address, equal);
         },
         outIndex,
         outFound);
@@ -749,7 +962,7 @@ bool VM::clearMap(VMWord handle)
     return true;
 }
 
-bool VM::containsMapKeyWord(VMWord handle, VMWord key, bool& out)
+bool VM::containsMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& out)
 {
     out = false;
 
@@ -758,8 +971,8 @@ bool VM::containsMapKeyWord(VMWord handle, VMWord key, bool& out)
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->mTypeID, key, cInvalidVMAddress, hash) == false ||
-        findMapEntry(block, key, hash, cInvalidVMAddress, index, found) == false)
+        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
     }
@@ -769,15 +982,15 @@ bool VM::containsMapKeyWord(VMWord handle, VMWord key, bool& out)
     return true;
 }
 
-bool VM::readMapValueWords(VMWord handle, VMWord key, VMWord* dst, u32 wordCount)
+bool VM::readMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayView<VMWord> dst)
 {
     MapBlock block;
     u32 hash = 0;
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->mTypeID, key, cInvalidVMAddress, hash) == false ||
-        findMapEntry(block, key, hash, cInvalidVMAddress, index, found) == false)
+        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
     }
@@ -789,44 +1002,45 @@ bool VM::readMapValueWords(VMWord handle, VMWord key, VMWord* dst, u32 wordCount
     }
 
     VMWord* value = block.getValue(index);
-    copyWords(dst, value, wordCount);
+    copyWords(dst.data(), value, static_cast<u32>(dst.size()));
 
     return true;
 }
 
-bool VM::writeMapValueWords(VMWord handle, VMWord key, const VMWord* src, u32 wordCount)
+bool VM::writeMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayView<const VMWord> value)
 {
     MapBlock block;
     u32 hash = 0;
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->mTypeID, key, cInvalidVMAddress, hash) == false ||
-        findMapEntry(block, key, hash, cInvalidVMAddress, index, found) == false)
+        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
     }
 
-    if (found == false)
+    // Note that this assumes that the caller already roots relevant stuff, since we can grow here.
+    if (found == false && block.mHeader->mLength >= block.getEntryCapacity())
     {
         if (ensureMapCapacity(handle, block, block.mHeader->mLength + 1U, cInvalidVMAddress) == false ||
-            findMapEntry(block, key, hash, cInvalidVMAddress, index, found) == false)
+            findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
         {
             return false;
         }
-
-        SIMLANG_ASSERTM(found == false && index < block.getBucketCapacity(),
-                        "Map insertion must find an empty bucket.");
-        block.insertEntry(index, hash, key);
     }
 
-    VMWord* value = block.getValue(index);
-    copyWords(value, src, wordCount);
+    if (found == false)
+    {
+        block.insertEntry(index, hash, key.data());
+    }
+
+    copyWords(block.getValue(index), value.data(), static_cast<u32>(value.size()));
 
     return true;
 }
 
-bool VM::removeMapKeyWord(VMWord handle, VMWord key, bool& outRemoved)
+bool VM::removeMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& outRemoved)
 {
     outRemoved = false;
 
@@ -835,8 +1049,8 @@ bool VM::removeMapKeyWord(VMWord handle, VMWord key, bool& outRemoved)
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->mTypeID, key, cInvalidVMAddress, hash) == false ||
-        findMapEntry(block, key, hash, cInvalidVMAddress, index, found) == false)
+        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
     }
@@ -1330,7 +1544,7 @@ bool VM::run()
         return block.getElement(static_cast<u32>(index));
     };
 
-    auto resolveMapValuePayload = [&](VMWord map, VMWord key, VMAddress address) -> VMWord*
+    auto resolveMapValuePayload = [&](VMWord map, const VMWord* key, VMAddress address) -> VMWord*
     {
         MapBlock block;
         u32 hash = 0;
@@ -1338,7 +1552,7 @@ bool VM::run()
         bool found = false;
         // Do the lookup for the map and key.
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             return nullptr;
@@ -1871,9 +2085,9 @@ bool VM::run()
     }
     VM_OP(DupN)
     {
-        // Code:  DupN(size: OpWordCount)
+        // Code:  DupN(size: u32)
         // Stack: [wordN-1, ..., word0, ...] -> [wordN-1, ..., word0, wordN-1, ..., word0, ...]
-        OpWordCount size = readPC<OpWordCount>(pc);
+        u32 size = readPC<u32>(pc);
         // Copy the top N words onto the ToS.
         copyWords(sp, sp - size, size);
         // Update the stack pointer to the new size.
@@ -2038,15 +2252,10 @@ bool VM::run()
         TypeID keyTypeID = readPC<TypeID>(pc);
         TypeID valueTypeID = readPC<TypeID>(pc);
 
-        // Get the type.
-        const TypeLayout& valueLayout = mImage.mTypeLayoutTable.getLayout(valueTypeID);
-        // Find out the element type size.
-        u32 valueWords = valueLayout.getSizeAsValue();
-
         // We need to sync here so the heap gets the correct stack roots (!).
         STACK_SYNC();
 
-        Heap::MapAlloc alloc = mHeap.allocateMap(keyTypeID, valueTypeID, valueWords, 0, *this);
+        Heap::MapAlloc alloc = mHeap.allocateMap(keyTypeID, valueTypeID, 0, *this);
         if (alloc.mRef == cNullRef)
         {
             reportRuntimeError(getRuntimeErrorAddress(pc, code),
@@ -2109,22 +2318,25 @@ bool VM::run()
     }
     VM_OP(RefMapValue)
     {
-        // Code:  RefMapValue()
-        // Stack: [key, map, ...] -> [addr, ...]
-        VMWord key = *--sp;
-        VMWord map = sp[-1];
+        // Code:  RefMapValue(index: MapAccessIdx)
+        // Stack: [key words, map, ...] -> [addr, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        VMWord* result = sp - 1U - access.mKeyWords;
+        const VMWord* key = result + 1;
+        VMWord map = result[0];
+        sp = result + 1;
 
         // Get the value data address from the map.
         VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
         if (value == nullptr)
         {
-            sp[-1] = cInvalidAddress;
+            result[0] = cInvalidAddress;
             VM_END_OP_CHECKED();
         }
 
         // Make the address and push it.
         HeapIndex valueIndex = mHeap.indexOf(value);
-        sp[-1] = makeHeapAddress(valueIndex);
+        result[0] = makeHeapAddress(valueIndex);
 
         VM_END_OP();
     }
@@ -2700,15 +2912,16 @@ bool VM::run()
     }
     VM_OP(LoadMapValue)
     {
-        // Code:  LoadMapValue(size: OpWordCount)
-        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
-        OpWordCount size = readPC<OpWordCount>(pc);
+        // Code:  LoadMapValue(index: MapAccessIdx)
+        // Stack: [key words, map, ...] -> [wordN-1, ..., word0, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        u32 size = access.mValueWords;
 
         // The result goes where the map address currently is.
-        VMWord* dst = sp - 2;
+        VMWord* dst = sp - 1U - access.mKeyWords;
         // Get map and key.
         VMWord map = dst[0];
-        VMWord key = dst[1];
+        VMWord* key = dst + 1;
         // Push N words.
         sp = dst + size;
 
@@ -2725,15 +2938,17 @@ bool VM::run()
     }
     VM_OP(StoreMapValue)
     {
-        // Code:  StoreMapValue(size: OpWordCount)
-        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
-        OpWordCount size = readPC<OpWordCount>(pc);
+        // Code:  StoreMapValue(index: MapAccessIdx)
+        // Stack: [wordN-1, ..., word0, key words, map, ...] -> [...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        u32 size = access.mValueWords;
 
         // The source starts at the first value word.
         VMWord* src = sp - size;
         // The key and the map are right below that.
-        VMWord key = src[-1];
-        VMWord map = src[-2];
+        VMWord* input = src - 1U - access.mKeyWords;
+        VMWord* key = input + 1;
+        VMWord map = input[0];
 
         // Sync the stack since the map, key, and value words have to be live for GC.
         STACK_SYNC();
@@ -2745,26 +2960,27 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
-            sp = src - 2;
+            sp = input;
             VM_END_OP_CHECKED();
         }
 
         // If we can't find the entry, we need to add a new one.
         if (found == false)
         {
-            // Grow the map if needed, which may reallocate a new block to the handle.
-            if (ensureMapCapacity(map, block, block.mHeader->mLength + 1U, address) == false ||
-                findMapEntry(block, key, hash, address, index, found) == false)
+            if (block.mHeader->mLength >= block.getEntryCapacity())
             {
-                sp = src - 2;
-                VM_END_OP_CHECKED();
+                // Only growth invalidates the empty-bucket index from the first probe.
+                if (ensureMapCapacity(map, block, block.mHeader->mLength + 1U, address) == false ||
+                    findMapEntry(block, key, hash, address, index, found) == false)
+                {
+                    sp = input;
+                    VM_END_OP_CHECKED();
+                }
             }
 
-            SIMLANG_ASSERTM(found == false && index < block.getBucketCapacity(),
-                            "Map insertion must find an empty bucket.");
             block.insertEntry(index, hash, key);
         }
 
@@ -2773,22 +2989,22 @@ bool VM::run()
         copyWords(dst, src, size);
 
         //  Pop everything.
-        sp = src - 2;
+        sp = input;
 
         VM_END_OP();
     }
     VM_OP(LoadMapValueField)
     {
-        // Code:  LoadMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
-        // Stack: [key, map, ...] -> [wordN-1, ..., word0, ...]
-        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
-        OpWordCount size = readPC<OpWordCount>(pc);
+        // Code:  LoadMapValueField(index: MapAccessIdx)
+        // Stack: [key words, map, ...] -> [wordN-1, ..., word0, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        u32 size = access.mValueWords;
 
         // The result goes where the map address currently is.
-        VMWord* dst = sp - 2;
+        VMWord* dst = sp - 1U - access.mKeyWords;
         // Get map and key.
         VMWord map = dst[0];
-        VMWord key = dst[1];
+        VMWord* key = dst + 1;
         // Push N words.
         sp = dst + size;
 
@@ -2799,23 +3015,24 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        copyWords(dst, value + fieldOffset, size);
+        copyWords(dst, value + access.mValueFieldOffset, size);
 
         VM_END_OP();
     }
     VM_OP(StoreMapValueField)
     {
-        // Code:  StoreMapValueField(fieldOffset: FieldOffset, size: OpWordCount)
-        // Stack: [wordN-1, ..., word0, key, map, ...] -> [...]
-        FieldOffset fieldOffset = readPC<FieldOffset>(pc);
-        OpWordCount size = readPC<OpWordCount>(pc);
+        // Code:  StoreMapValueField(index: MapAccessIdx)
+        // Stack: [wordN-1, ..., word0, key words, map, ...] -> [...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        u32 size = access.mValueWords;
 
         // The source starts at the first value word.
         VMWord* src = sp - size;
         // The key and the map are right below that.
-        VMWord key = src[-1];
-        VMWord map = src[-2];
-        sp = src - 2;
+        VMWord* input = src - 1U - access.mKeyWords;
+        VMWord* key = input + 1;
+        VMWord map = input[0];
+        sp = input;
 
         // Updating a field requires an existing value.
         VMWord* value = resolveMapValuePayload(map, key, getRuntimeErrorAddress(pc, code));
@@ -2824,7 +3041,7 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        copyWords(value + fieldOffset, src, size);
+        copyWords(value + access.mValueFieldOffset, src, size);
 
         VM_END_OP();
     }
@@ -3295,13 +3512,14 @@ bool VM::run()
     }
     VM_OP(MapContainsKey)
     {
-        // Code:  MapContainsKey()
-        // Stack: [key, map, ...] -> [bool, ...]
+        // Code:  MapContainsKey(index: MapAccessIdx)
+        // Stack: [key words, map, ...] -> [bool, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
         // The result goes where the map address currently is.
-        VMWord* result = sp - 2;
+        VMWord* result = sp - 1U - access.mKeyWords;
         // Get map and key.
         VMWord map = result[0];
-        VMWord key = result[1];
+        VMWord* key = result + 1;
 
         // Look up the block from the map handle, and then try to find the key.
         MapBlock block;
@@ -3310,7 +3528,7 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             result[0] = VMWord{};
@@ -3321,20 +3539,21 @@ bool VM::run()
         // If we found the key, push 1, otherwise 0.
         result[0] = found ? 1U : 0U;
 
-        // Pop the key (the map address was replaced with the result).
+        // Pop the key words (the map address was replaced with the result).
         sp = result + 1;
 
         VM_END_OP();
     }
     VM_OP(MapRemove)
     {
-        // Code:  MapRemove()
-        // Stack: [key, map, ...] -> [bool, ...]
+        // Code:  MapRemove(index: MapAccessIdx)
+        // Stack: [key words, map, ...] -> [bool, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
         // The result goes where the map address currently is.
-        VMWord* result = sp - 2;
+        VMWord* result = sp - 1U - access.mKeyWords;
         // Get map and key.
         VMWord map = result[0];
-        VMWord key = result[1];
+        VMWord* key = result + 1;
 
         // Look up the block from the map handle, and then try to find the key.
         MapBlock block;
@@ -3343,7 +3562,7 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->mTypeID, key, address, hash) == false ||
+            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             result[0] = VMWord{};
@@ -3365,7 +3584,7 @@ bool VM::run()
         // We found something.
         result[0] = 1U;
 
-        // Pop the key, the map was overwritten with the result.
+        // Pop the key words, the map was overwritten with the result.
         sp = result + 1;
 
         VM_END_OP();

@@ -3,9 +3,11 @@
 #include <vector>
 
 #include "backend/bytecode/bytecodeprogram.h"
+#include "backend/layout/keyopstablebuilder.h"
 #include "backend/layout/typelayouttablebuilder.h"
 #include "backend/stringdata.h"
 #include "runtime/callinfo.h"
+#include "runtime/mapaccess.h"
 #include "runtime/runtimedebuginfo.h"
 #include "runtime/syscall/syscallentry.h"
 #include "runtime/typeids.h"
@@ -32,9 +34,11 @@ struct BackendState
     std::vector<LambdaNode*> mLambdas;
     std::vector<FunctionIdx> mInterfaceMethods;
     std::vector<InterfaceCallInfo> mInterfaceCallInfos;
+    std::vector<MapAccessInfo> mMapAccessInfos;
     std::vector<SyscallEntry> mSyscallInfos;
 
     TypeLayoutTableBuilder mTypeLayoutTable;
+    KeyOpsTableBuilder mKeyOpsTable;
 
     StringPoolBuilder mStrings;
     StringFormatTableBuilder mStringFormats;

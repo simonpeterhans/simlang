@@ -494,6 +494,14 @@ void BytecodeDump::writeStringLiteralIndex(const char* name, StringLiteralIdx in
     mOut << "(\"" << escape::formatEscapedText(text) << "\")";
 }
 
+void BytecodeDump::writeMapAccessIndex(MapAccessIdx index)
+{
+    mOut << "mIndex=" << index;
+    const MapAccessInfo& info = mCtx.mBackend.mMapAccessInfos[index];
+    mOut << "(key-words=" << info.mKeyWords << " value-field-offset=" << info.mValueFieldOffset
+         << " value-words=" << info.mValueWords << ")";
+}
+
 void BytecodeDump::writeOperandList(const Op& op)
 {
     if (mOptions.mIncludeAnnotations)
@@ -541,6 +549,41 @@ void BytecodeDump::writeOperandList(const Op& op)
             case OpCode::cCheckCast:
             {
                 writeTypeIndex("mTypeID", op.as.mCheckCast.mTypeID);
+                return;
+            }
+            case OpCode::cRefMapValue:
+            {
+                writeMapAccessIndex(op.as.mRefMapValue.mIndex);
+                return;
+            }
+            case OpCode::cLoadMapValue:
+            {
+                writeMapAccessIndex(op.as.mLoadMapValue.mIndex);
+                return;
+            }
+            case OpCode::cStoreMapValue:
+            {
+                writeMapAccessIndex(op.as.mStoreMapValue.mIndex);
+                return;
+            }
+            case OpCode::cLoadMapValueField:
+            {
+                writeMapAccessIndex(op.as.mLoadMapValueField.mIndex);
+                return;
+            }
+            case OpCode::cStoreMapValueField:
+            {
+                writeMapAccessIndex(op.as.mStoreMapValueField.mIndex);
+                return;
+            }
+            case OpCode::cMapContainsKey:
+            {
+                writeMapAccessIndex(op.as.mMapContainsKey.mIndex);
+                return;
+            }
+            case OpCode::cMapRemove:
+            {
+                writeMapAccessIndex(op.as.mMapRemove.mIndex);
                 return;
             }
             case OpCode::cPushString:

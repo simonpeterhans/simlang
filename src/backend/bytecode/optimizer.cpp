@@ -15,7 +15,7 @@
 namespace simlang
 {
 
-static Op makeDupOp(OpWordCount wordCount)
+static Op makeDupOp(u32 wordCount)
 {
     if (wordCount == 1)
     {

@@ -459,12 +459,12 @@ bool CodeGenVisitor::visitNewObject(NewObjectNode* node)
 {
     if (node->mResolvedType->mKind == TypeKind::cList)
     {
-        return emitNewList(node, static_cast<ListType*>(node->mResolvedType));
+        return emitNewList(static_cast<ListType*>(node->mResolvedType));
     }
 
     if (node->mResolvedType->mKind == TypeKind::cMap)
     {
-        return emitNewMap(node, static_cast<MapType*>(node->mResolvedType));
+        return emitNewMap(static_cast<MapType*>(node->mResolvedType));
     }
 
     auto* aggregateType = static_cast<AggregateType*>(node->mResolvedType);

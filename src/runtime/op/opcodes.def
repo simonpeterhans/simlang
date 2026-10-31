@@ -18,7 +18,7 @@ X( TestNZ,                1,    VMAddress,        mAddress,     void,           
 X( Pop,                   0,    void,             _1,           void,            _2 )
 X( PopN,                  1,    OpWordCount,      mSize,        void,            _2 )
 X( Dup,                   0,    void,             _1,           void,            _2 )
-X( DupN,                  1,    OpWordCount,      mSize,        void,            _2 )
+X( DupN,                  1,    u32,              mSize,        void,            _2 )
 
 X( Push8,                 1,    u8,               mInt8,        void,            _2 )
 X( Push8S,                1,    i8,               mInt8,        void,            _2 )
@@ -38,7 +38,7 @@ X( RefField,              1,    FieldOffset,      mFieldOffset, void,           
 X( RefObjField,           1,    FieldOffset,      mFieldOffset, void,            _2 )
 X( RefCapture,            1,    FieldOffset,      mFieldOffset, void,            _2 )
 X( RefListElement,        0,    void,             _1,           void,            _2 )
-X( RefMapValue,           0,    void,             _1,           void,            _2 )
+X( RefMapValue,           1,    MapAccessIdx,     mIndex,       void,            _2 )
 
 X( LoadLocal,             1,    LocalIdx,         mLocalIdx,    void,            _2 )
 X( StoreLocal,            1,    LocalIdx,         mLocalIdx,    void,            _2 )
@@ -74,10 +74,10 @@ X( StoreListElement,      1,    OpWordCount,      mSize,        void,           
 X( LoadListElementField,  2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
 X( StoreListElementField, 2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
 
-X( LoadMapValue,          1,    OpWordCount,      mSize,        void,            _2 )
-X( StoreMapValue,         1,    OpWordCount,      mSize,        void,            _2 )
-X( LoadMapValueField,     2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
-X( StoreMapValueField,    2,    FieldOffset,      mFieldOffset, OpWordCount,     mSize )
+X( LoadMapValue,          1,    MapAccessIdx,     mIndex,       void,            _2 )
+X( StoreMapValue,         1,    MapAccessIdx,     mIndex,       void,            _2 )
+X( LoadMapValueField,     1,    MapAccessIdx,     mIndex,       void,            _2 )
+X( StoreMapValueField,    1,    MapAccessIdx,     mIndex,       void,            _2 )
 
 X( ListSize,              0,    void,             _1,           void,            _2 )
 X( ListIsEmpty,           0,    void,             _1,           void,            _2 )
@@ -95,8 +95,8 @@ X( ListReserve,           0,    void,             _1,           void,           
 X( MapSize,               0,    void,             _1,           void,            _2 )
 X( MapIsEmpty,            0,    void,             _1,           void,            _2 )
 X( MapClear,              0,    void,             _1,           void,            _2 )
-X( MapContainsKey,        0,    void,             _1,           void,            _2 )
-X( MapRemove,             0,    void,             _1,           void,            _2 )
+X( MapContainsKey,        1,    MapAccessIdx,     mIndex,       void,            _2 )
+X( MapRemove,             1,    MapAccessIdx,     mIndex,       void,            _2 )
 X( MapReserve,            0,    void,             _1,           void,            _2 )
 
 X( I2F,                   0,    void,             _1,           void,            _2 )

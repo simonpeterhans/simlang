@@ -53,6 +53,7 @@ private:
     void writeSyscallIndex(const char* name, SyscallIdx index);
     void writeTypeIndex(const char* name, TypeID index);
     void writeStringLiteralIndex(const char* name, StringLiteralIdx index);
+    void writeMapAccessIndex(MapAccessIdx index);
 
     void writeOperandList(const Op& op);
     void writeOpLine(u32 index, const Op& op);

@@ -71,7 +71,8 @@ static bool getSuccessorHeight(u32 height, BytecodeCFGEdgeKind kind, u32& outHei
 
         case BytecodeCFGEdgeKind::cTestTakenKeep:
         {
-            return true;
+            // The taken branch retains the condition, but still requires it.
+            return replaceStackWords(outHeight, 1, 1);
         }
     }
 
@@ -180,62 +181,65 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
 
     switch (op.mOpCode)
     {
-        case OpCode::cLabel:
+        // No simulated stack change.
         case OpCode::cHalt:
-        case OpCode::cJump:
         case OpCode::cReturn:
-        case OpCode::cRefField:
-        case OpCode::cRefObjField:
-        case OpCode::cLoadRef:
-        case OpCode::cLoadRefField:
-        case OpCode::cLoadObjField:
-        case OpCode::cListSize:
-        case OpCode::cListIsEmpty:
-        case OpCode::cMapSize:
-        case OpCode::cMapIsEmpty:
+        case OpCode::cJump:
         case OpCode::cIncLocal:
-        case OpCode::cI2F:
-        case OpCode::cF2I:
-        case OpCode::cCheckCast:
-        case OpCode::cINeg:
-        case OpCode::cFNeg:
-        case OpCode::cINot:
+        case OpCode::cLabel:
         {
             return true;
         }
 
-        case OpCode::cSyscall:
+        // Pure pushes.
+        case OpCode::cPush8:
+        case OpCode::cPush8S:
+        case OpCode::cPush16:
+        case OpCode::cPush16S:
+        case OpCode::cPush32:
+        case OpCode::cPushString:
+        case OpCode::cNewObject:
+        case OpCode::cNewList:
+        case OpCode::cNewMap:
+        case OpCode::cRefLocal:
+        case OpCode::cRefGlobal:
+        case OpCode::cRefCapture:
+        case OpCode::cLoadLocal:
+        case OpCode::cLoadGlobal:
+        case OpCode::cLoadCapture:
         {
-            const SyscallEntry& entry = mBackend.mSyscallInfos[op.as.mSyscall.mIndex];
-            return replaceStackWords(height, entry.mArgWords, entry.mReturnWords);
-        }
-        case OpCode::cCall:
-        case OpCode::cCallMethod:
-        {
-            FunctionIdx index = (op.mOpCode == OpCode::cCall) ? op.as.mCall.mIndex : op.as.mCallMethod.mIndex;
-            const FunctionInfo& function = mBackend.mFunctionInfos[index];
-            return replaceStackWords(height, function.mArgWords, function.mReturnWords);
-        }
-        case OpCode::cCallValue:
-        {
-            // Here, we also push the context and the value of the callable itself along with the args.
-            return replaceStackWords(height,
-                                     cFunctionValueWordCount + static_cast<u32>(op.as.mCallValue.mArgWords),
-                                     op.as.mCallValue.mReturnWords);
-        }
-        case OpCode::cCallInterface:
-        {
-            const InterfaceCallInfo& info = mBackend.mInterfaceCallInfos[op.as.mCallInterface.mIndex];
-            return replaceStackWords(height, static_cast<u32>(info.mArgWords) + 2U, info.mReturnWords);
-        }
-        case OpCode::cNewClosure:
-        {
-            // Here, we consume the captured variables and push the environment and entry token.
-            const FunctionInfo& function = mBackend.mFunctionInfos[op.as.mNewClosure.mIndex];
-            const TypeLayout& environment = mBackend.mTypeLayoutTable.getLayout(function.mEnvironmentTypeID);
-            return replaceStackWords(height, environment.getSizeOnHeap(), cFunctionValueWordCount);
+            return pushStackWords(height, 1);
         }
 
+        case OpCode::cLoadLocalN:
+        {
+            return pushStackWords(height, op.as.mLoadLocalN.mSize);
+        }
+
+        case OpCode::cLoadGlobalN:
+        {
+            return pushStackWords(height, op.as.mLoadGlobalN.mSize);
+        }
+
+        case OpCode::cLoadCaptureN:
+        {
+            return pushStackWords(height, op.as.mLoadCaptureN.mSize);
+        }
+
+        // Duplication.
+        case OpCode::cDup:
+        {
+            return replaceStackWords(height, 1, 2);
+        }
+
+        case OpCode::cDupN:
+        {
+            // Require the source words, then add their copies without doubling a u32 count.
+            u32 size = op.as.mDupN.mSize;
+            return height >= size && pushStackWords(height, size);
+        }
+
+        // Pure pops.
         case OpCode::cJumpZ:
         case OpCode::cJumpNZ:
         case OpCode::cPop:
@@ -244,120 +248,9 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             return popStackWords(height, 1);
         }
 
-        case OpCode::cTestZ:
-        case OpCode::cTestNZ:
-        {
-            // Assume we pass and leave the value on the stack.
-            return true;
-        }
-
         case OpCode::cPopN:
         {
             return popStackWords(height, op.as.mPopN.mSize);
-        }
-
-        case OpCode::cDup:
-        case OpCode::cPush8:
-        case OpCode::cPush8S:
-        case OpCode::cPush16:
-        case OpCode::cPush16S:
-        case OpCode::cPush32:
-        case OpCode::cPushString:
-        case OpCode::cRefLocal:
-        case OpCode::cRefGlobal:
-        case OpCode::cRefCapture:
-        case OpCode::cLoadLocal:
-        case OpCode::cLoadGlobal:
-        case OpCode::cLoadCapture:
-        case OpCode::cNewObject:
-        case OpCode::cNewList:
-        case OpCode::cNewMap:
-        {
-            return pushStackWords(height, 1);
-        }
-
-        case OpCode::cRefListElement:
-        case OpCode::cRefMapValue:
-        {
-            // Here we actually pop 1 word since we have a list/map and an index on the stack.
-            return popStackWords(height, 1);
-        }
-
-        case OpCode::cDupN:
-        {
-            return pushStackWords(height, op.as.mDupN.mSize);
-        }
-
-        case OpCode::cFormatString:
-        {
-            const StringFormatTemplate& tmpl = mBackend.mStringFormats.geTemplates()[op.as.mFormatString.mIndex];
-            return replaceStackWords(height, static_cast<u32>(tmpl.mArgKinds.size()), 1);
-        }
-
-        case OpCode::cLoadLocalN:
-        {
-            return pushStackWords(height, op.as.mLoadLocalN.mSize);
-        }
-        case OpCode::cLoadGlobalN:
-        {
-            return pushStackWords(height, op.as.mLoadGlobalN.mSize);
-        }
-        case OpCode::cLoadCaptureN:
-        {
-            return pushStackWords(height, op.as.mLoadCaptureN.mSize);
-        }
-        case OpCode::cLoadRefN:
-        {
-            return replaceStackWords(height, 1, op.as.mLoadRefN.mSize);
-        }
-        case OpCode::cLoadRefFieldN:
-        {
-            return replaceStackWords(height, 1, op.as.mLoadRefFieldN.mSize);
-        }
-        case OpCode::cLoadObjFieldN:
-        {
-            return replaceStackWords(height, 1, op.as.mLoadObjFieldN.mSize);
-        }
-        case OpCode::cLoadListElement:
-        {
-            return replaceStackWords(height, 2, op.as.mLoadListElement.mSize);
-        }
-        case OpCode::cLoadListElementField:
-        {
-            return replaceStackWords(height, 2, op.as.mLoadListElementField.mSize);
-        }
-        case OpCode::cLoadMapValue:
-        {
-            return replaceStackWords(height, 2, op.as.mLoadMapValue.mSize);
-        }
-        case OpCode::cLoadMapValueField:
-        {
-            return replaceStackWords(height, 2, op.as.mLoadMapValueField.mSize);
-        }
-        case OpCode::cListPop:
-        {
-            return replaceStackWords(height, 1, op.as.mListPop.mSize);
-        }
-        case OpCode::cListBack:
-        {
-            return replaceStackWords(height, 1, op.as.mListBack.mSize);
-        }
-        case OpCode::cListRemoveAt:
-        {
-            return replaceStackWords(height, 2, op.as.mListRemoveAt.mSize);
-        }
-        case OpCode::cListIndexOf:
-        {
-            return replaceStackWords(height, static_cast<u32>(op.as.mListIndexOf.mSize) + 1U, 1);
-        }
-        case OpCode::cListContains:
-        {
-            return replaceStackWords(height, static_cast<u32>(op.as.mListContains.mSize) + 1U, 1);
-        }
-        case OpCode::cMapContainsKey:
-        case OpCode::cMapRemove:
-        {
-            return replaceStackWords(height, 2, 1);
         }
 
         case OpCode::cStoreLocal:
@@ -365,10 +258,12 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return popStackWords(height, 1);
         }
+
         case OpCode::cStoreLocalN:
         {
             return popStackWords(height, op.as.mStoreLocalN.mSize);
         }
+
         case OpCode::cStoreGlobalN:
         {
             return popStackWords(height, op.as.mStoreGlobalN.mSize);
@@ -380,56 +275,107 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             return popStackWords(height, 2);
         }
+
         case OpCode::cStoreRefN:
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreRefN.mSize) + 1U);
         }
+
         case OpCode::cStoreRefFieldN:
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreRefFieldN.mSize) + 1U);
         }
+
         case OpCode::cStoreObjFieldN:
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreObjFieldN.mSize) + 1U);
         }
+
         case OpCode::cStoreListElement:
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreListElement.mSize) + 2U);
         }
+
         case OpCode::cStoreListElementField:
         {
             return popStackWords(height, static_cast<u32>(op.as.mStoreListElementField.mSize) + 2U);
         }
+
         case OpCode::cStoreMapValue:
         {
-            return popStackWords(height, static_cast<u32>(op.as.mStoreMapValue.mSize) + 2U);
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mStoreMapValue.mIndex];
+            return popStackWords(height, 1U + access.mKeyWords + access.mValueWords);
         }
+
         case OpCode::cStoreMapValueField:
         {
-            return popStackWords(height, static_cast<u32>(op.as.mStoreMapValueField.mSize) + 2U);
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mStoreMapValueField.mIndex];
+            return popStackWords(height, 1U + access.mKeyWords + access.mValueWords);
         }
-        case OpCode::cListClear:
-        case OpCode::cMapClear:
-        {
-            return popStackWords(height, 1);
-        }
-        case OpCode::cListReserve:
-        case OpCode::cListAddList:
-        case OpCode::cMapReserve:
-        {
-            return popStackWords(height, 2);
-        }
+
         case OpCode::cListPush:
         {
             return popStackWords(height, static_cast<u32>(op.as.mListPush.mSize) + 1U);
         }
+
+        case OpCode::cListAddList:
+        case OpCode::cListReserve:
+        case OpCode::cMapReserve:
+        {
+            return popStackWords(height, 2);
+        }
+
         case OpCode::cListInsert:
         {
             return popStackWords(height, static_cast<u32>(op.as.mListInsert.mSize) + 2U);
         }
 
-        case OpCode::cSEQ:
-        case OpCode::cSNE:
+        case OpCode::cListClear:
+        case OpCode::cMapClear:
+        {
+            return popStackWords(height, 1);
+        }
+
+        // Fixed replacements.
+        // CFG traversal handles the taken and fallthrough effects separately.
+        case OpCode::cTestZ:
+        case OpCode::cTestNZ:
+        case OpCode::cRefField:
+        case OpCode::cRefObjField:
+        case OpCode::cLoadRef:
+        case OpCode::cLoadRefField:
+        case OpCode::cLoadObjField:
+        case OpCode::cListSize:
+        case OpCode::cListIsEmpty:
+        case OpCode::cMapSize:
+        case OpCode::cMapIsEmpty:
+        case OpCode::cI2F:
+        case OpCode::cF2I:
+        case OpCode::cCheckCast:
+        case OpCode::cINeg:
+        case OpCode::cINot:
+        case OpCode::cFNeg:
+        {
+            // Consume one operand and replace it with one result.
+            return replaceStackWords(height, 1, 1);
+        }
+
+        case OpCode::cRefListElement:
+        case OpCode::cIAdd:
+        case OpCode::cISub:
+        case OpCode::cIMul:
+        case OpCode::cIDiv:
+        case OpCode::cIMod:
+        case OpCode::cIAnd:
+        case OpCode::cIOr:
+        case OpCode::cIXor:
+        case OpCode::cIShL:
+        case OpCode::cIShR:
+        case OpCode::cFAdd:
+        case OpCode::cFSub:
+        case OpCode::cFMul:
+        case OpCode::cFDiv:
+        case OpCode::cFMod:
         case OpCode::cIEQ:
         case OpCode::cINE:
         case OpCode::cILT:
@@ -442,23 +388,136 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cFLE:
         case OpCode::cFGT:
         case OpCode::cFGE:
-        case OpCode::cIAdd:
-        case OpCode::cISub:
-        case OpCode::cIMul:
-        case OpCode::cIDiv:
-        case OpCode::cIMod:
-        case OpCode::cFAdd:
-        case OpCode::cFSub:
-        case OpCode::cFMul:
-        case OpCode::cFDiv:
-        case OpCode::cFMod:
-        case OpCode::cIAnd:
-        case OpCode::cIOr:
-        case OpCode::cIXor:
-        case OpCode::cIShL:
-        case OpCode::cIShR:
+        case OpCode::cSEQ:
+        case OpCode::cSNE:
         {
-            return popStackWords(height, 1);
+            // Consume both operands and produce one result.
+            return replaceStackWords(height, 2, 1);
+        }
+
+        // Variable replacements.
+        case OpCode::cCall:
+        case OpCode::cCallMethod:
+        {
+            FunctionIdx index = (op.mOpCode == OpCode::cCall) ? op.as.mCall.mIndex : op.as.mCallMethod.mIndex;
+            const FunctionInfo& function = mBackend.mFunctionInfos[index];
+            return replaceStackWords(height, function.mArgWords, function.mReturnWords);
+        }
+
+        case OpCode::cCallValue:
+        {
+            // Here, we also push the context and the value of the callable itself along with the args.
+            return replaceStackWords(height,
+                                     cFunctionValueWordCount + static_cast<u32>(op.as.mCallValue.mArgWords),
+                                     op.as.mCallValue.mReturnWords);
+        }
+
+        case OpCode::cCallInterface:
+        {
+            const InterfaceCallInfo& info = mBackend.mInterfaceCallInfos[op.as.mCallInterface.mIndex];
+            return replaceStackWords(height, static_cast<u32>(info.mArgWords) + 2U, info.mReturnWords);
+        }
+
+        case OpCode::cSyscall:
+        {
+            const SyscallEntry& entry = mBackend.mSyscallInfos[op.as.mSyscall.mIndex];
+            return replaceStackWords(height, entry.mArgWords, entry.mReturnWords);
+        }
+
+        case OpCode::cNewClosure:
+        {
+            // Here, we consume the captured variables and push the environment and entry token.
+            const FunctionInfo& function = mBackend.mFunctionInfos[op.as.mNewClosure.mIndex];
+            const TypeLayout& environment = mBackend.mTypeLayoutTable.getLayout(function.mEnvironmentTypeID);
+            return replaceStackWords(height, environment.getSizeOnHeap(), cFunctionValueWordCount);
+        }
+
+        case OpCode::cRefMapValue:
+        {
+            // Here, we have map handle and the key words and push the address of the stored value.
+            // We need to look up how many key words the access needs.
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mRefMapValue.mIndex];
+            return replaceStackWords(height, 1U + access.mKeyWords, 1);
+        }
+
+        case OpCode::cLoadRefN:
+        {
+            return replaceStackWords(height, 1, op.as.mLoadRefN.mSize);
+        }
+
+        case OpCode::cLoadRefFieldN:
+        {
+            return replaceStackWords(height, 1, op.as.mLoadRefFieldN.mSize);
+        }
+
+        case OpCode::cLoadObjFieldN:
+        {
+            return replaceStackWords(height, 1, op.as.mLoadObjFieldN.mSize);
+        }
+
+        case OpCode::cLoadListElement:
+        {
+            return replaceStackWords(height, 2, op.as.mLoadListElement.mSize);
+        }
+
+        case OpCode::cLoadListElementField:
+        {
+            return replaceStackWords(height, 2, op.as.mLoadListElementField.mSize);
+        }
+
+        case OpCode::cLoadMapValue:
+        {
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mLoadMapValue.mIndex];
+            return replaceStackWords(height, 1U + access.mKeyWords, access.mValueWords);
+        }
+
+        case OpCode::cLoadMapValueField:
+        {
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mLoadMapValueField.mIndex];
+            return replaceStackWords(height, 1U + access.mKeyWords, access.mValueWords);
+        }
+
+        case OpCode::cListPop:
+        {
+            return replaceStackWords(height, 1, op.as.mListPop.mSize);
+        }
+
+        case OpCode::cListBack:
+        {
+            return replaceStackWords(height, 1, op.as.mListBack.mSize);
+        }
+
+        case OpCode::cListRemoveAt:
+        {
+            return replaceStackWords(height, 2, op.as.mListRemoveAt.mSize);
+        }
+
+        case OpCode::cListIndexOf:
+        {
+            return replaceStackWords(height, static_cast<u32>(op.as.mListIndexOf.mSize) + 1U, 1);
+        }
+
+        case OpCode::cListContains:
+        {
+            return replaceStackWords(height, static_cast<u32>(op.as.mListContains.mSize) + 1U, 1);
+        }
+
+        case OpCode::cMapContainsKey:
+        {
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mMapContainsKey.mIndex];
+            return replaceStackWords(height, 1U + access.mKeyWords, 1);
+        }
+
+        case OpCode::cMapRemove:
+        {
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mMapRemove.mIndex];
+            return replaceStackWords(height, 1U + access.mKeyWords, 1);
+        }
+
+        case OpCode::cFormatString:
+        {
+            const StringFormatTemplate& tmpl = mBackend.mStringFormats.geTemplates()[op.as.mFormatString.mIndex];
+            return replaceStackWords(height, static_cast<u32>(tmpl.mArgKinds.size()), 1);
         }
     }
 
