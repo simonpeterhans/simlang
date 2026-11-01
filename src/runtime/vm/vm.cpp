@@ -875,7 +875,7 @@ bool VM::findMapEntry(const MapBlock& block,
     };
 
     // If we do not have a user-defined type, do simple stuff once again.
-    TypeID keyTypeID = block.mHeader->getMapKeyTypeID();
+    TypeID keyTypeID = block.getKeyTypeID();
     switch (keyTypeID)
     {
         case cIntTypeID:
@@ -971,7 +971,7 @@ bool VM::containsMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& o
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        hashMapKey(block.getKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
         findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
@@ -989,7 +989,7 @@ bool VM::readMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayView
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        hashMapKey(block.getKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
         findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
@@ -1014,7 +1014,7 @@ bool VM::writeMapValueWords(VMWord handle, ArrayView<const VMWord> key, ArrayVie
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        hashMapKey(block.getKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
         findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
@@ -1049,7 +1049,7 @@ bool VM::removeMapKeyWords(VMWord handle, ArrayView<const VMWord> key, bool& out
     u32 index = 0;
     bool found = false;
     if (getCheckedMapBlock(handle, block, cInvalidVMAddress) == false ||
-        hashMapKey(block.mHeader->getMapKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
+        hashMapKey(block.getKeyTypeID(), key.data(), cInvalidVMAddress, hash) == false ||
         findMapEntry(block, key.data(), hash, cInvalidVMAddress, index, found) == false)
     {
         return false;
@@ -1187,18 +1187,13 @@ bool VM::getUncheckedStringView(VMWord value, std::string_view& out)
     }
 
     // If we're here, this is a dynamic string, so we need to look it up on the heap.
-    Block block;
-    if (mHeap.resolvePayloadAddress(value, block) == false)
+    StringBlock block;
+    if (mHeap.resolveStringAddress(value, block) == false)
     {
         return false;
     }
 
-    if (block.mHeader->mBlockType != BlockType::cString)
-    {
-        return false;
-    }
-
-    out = StringBlock{block.mHeader, block.mPayload}.getView();
+    out = block.getView();
 
     return true;
 }
@@ -1552,7 +1547,7 @@ bool VM::run()
         bool found = false;
         // Do the lookup for the map and key.
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
+            hashMapKey(block.getKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             return nullptr;
@@ -2960,7 +2955,7 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
+            hashMapKey(block.getKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             sp = input;
@@ -3528,7 +3523,7 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
+            hashMapKey(block.getKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             result[0] = VMWord{};
@@ -3562,7 +3557,7 @@ bool VM::run()
         u32 index = 0;
         bool found = false;
         if (getCheckedMapBlock(map, block, address) == false ||
-            hashMapKey(block.mHeader->getMapKeyTypeID(), key, address, hash) == false ||
+            hashMapKey(block.getKeyTypeID(), key, address, hash) == false ||
             findMapEntry(block, key, hash, address, index, found) == false)
         {
             result[0] = VMWord{};

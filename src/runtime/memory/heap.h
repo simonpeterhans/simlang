@@ -74,6 +74,7 @@ public:
     bool resizeMap(VMWord handle, u32 capacity, const RootProvider& roots);
 
     bool resolvePayloadAddress(VMWord address, Block& out);
+    bool resolveStringAddress(VMWord address, StringBlock& out);
     bool resolveHandle(VMWord handle, Block& out);
     bool resolveListHandle(VMWord handle, ListBlock& out);
     bool resolveMapHandle(VMWord handle, MapBlock& out);
@@ -93,7 +94,14 @@ private:
         return *reinterpret_cast<const BlockHeader*>(&mData[base]);
     }
 
-    static HeapIndex payloadIndexFromBase(HeapIndex base) { return base + cBlockHeaderWords; }
+    StringHeader& stringHeaderFromBase(HeapIndex base) { return *reinterpret_cast<StringHeader*>(&mData[base]); }
+    ListHeader& listHeaderFromBase(HeapIndex base) { return *reinterpret_cast<ListHeader*>(&mData[base]); }
+    MapHeader& mapHeaderFromBase(HeapIndex base) { return *reinterpret_cast<MapHeader*>(&mData[base]); }
+
+    HeapIndex payloadIndexFromBase(HeapIndex base) const
+    {
+        return base + getBlockHeaderWords(headerFromBase(base).mBlockType);
+    }
     VMWord* payloadFromBase(HeapIndex base) { return &mData[payloadIndexFromBase(base)]; }
     const VMWord* payloadFromBase(HeapIndex base) const { return &mData[payloadIndexFromBase(base)]; }
 
@@ -106,26 +114,14 @@ private:
     bool resolveHandleToBase(VMWord handle, HeapIndex& outBase) const;
     bool resolveListHandle(VMWord handle, HeapIndex& outBase, ListBlock& out);
     bool resolveMapHandle(VMWord handle, HeapIndex& outBase, MapBlock& out);
+    ListBlock makeListBlock(HeapIndex base);
     MapBlock makeMapBlock(HeapIndex base);
 
-    HeapIndex alloc(BlockType t,
-                    TypeID typeID,
-                    u64 requestedPayloadWords,
-                    u32 length,
-                    u32 elementWords,
-                    const RootProvider& roots,
-                    bool zero,
-                    TypeID mapValueTypeID = 0);
+    HeapIndex alloc(BlockType t, TypeID typeID, u64 requestedPayloadWords, const RootProvider& roots, bool zero);
     HeapIndex tryAllocFromFreeList(u32 requestedWords, u32& allocatedWords);
     bool growHeap(u32 minWords);
     bool appendFreeBlock(u32 words);
-    void writeHeader(HeapIndex base,
-                     BlockType t,
-                     TypeID typeID,
-                     u32 totalWords,
-                     u32 length,
-                     u32 elementWords,
-                     TypeID mapValueTypeID = 0);
+    void writeHeader(HeapIndex base, BlockType t, TypeID typeID, u32 totalWords);
     void setOwnerRange(HeapIndex base, u32 totalWords);
     VMWord makeHandle(HeapIndex base);
 

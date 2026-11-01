@@ -13,7 +13,7 @@ namespace simlang
 {
 
 static constexpr u32 cMinPayloadWords = 1;
-static constexpr u32 cMinBlockWords = cBlockHeaderWords + cMinPayloadWords;
+static constexpr u32 cMinBlockWords = getBlockHeaderWords(BlockType::cFree) + cMinPayloadWords;
 
 static constexpr f32 cMaxHeapGrowthFactor = 4.0f;
 static constexpr f32 cMaxGCGrowthFactor = 16.0f;
@@ -72,7 +72,7 @@ Heap::Heap(HeapOptions options)
 
 VMWord Heap::allocateObject(TypeID typeID, u32 dataWords, const RootProvider& roots)
 {
-    HeapIndex base = alloc(BlockType::cObject, typeID, dataWords, 0, 0, roots, true);
+    HeapIndex base = alloc(BlockType::cObject, typeID, dataWords, roots, true);
     if (base == cInvalidHeapIndex)
     {
         return cNullRef;
@@ -85,11 +85,13 @@ VMWord Heap::allocateObject(TypeID typeID, u32 dataWords, const RootProvider& ro
 Heap::StringAlloc Heap::allocateString(u32 byteLen, const RootProvider& roots)
 {
     // Allocate stuff.
-    HeapIndex base = alloc(BlockType::cString, 0, StringBlock::getPayloadFromBytes(byteLen), byteLen, 0, roots, false);
+    HeapIndex base = alloc(BlockType::cString, 0, StringBlock::getPayloadFromBytes(byteLen), roots, false);
     if (base == cInvalidHeapIndex)
     {
         return {};
     }
+
+    stringHeaderFromBase(base).mLength = byteLen;
 
     // Here, we also return the heap address to the payload.
     StringAlloc ret;
@@ -106,11 +108,15 @@ Heap::ListAlloc Heap::allocateList(TypeID elemTypeID, u32 elemWords, u32 capacit
     u64 payloadWords = getListPayloadWords(elemWords, capacity);
 
     // Allocate stuff.
-    HeapIndex base = alloc(BlockType::cList, elemTypeID, payloadWords, 0, elemWords, roots, true);
+    HeapIndex base = alloc(BlockType::cList, elemTypeID, payloadWords, roots, true);
     if (base == cInvalidHeapIndex)
     {
         return {};
     }
+
+    ListHeader& header = listHeaderFromBase(base);
+    header.mLength = 0;
+    header.mElementWords = elemWords;
 
     // Here, we make a stable handle for the list in case the underlying memory is reallocated as the list grows.
     VMWord ref = makeHandle(base);
@@ -121,7 +127,7 @@ Heap::ListAlloc Heap::allocateList(TypeID elemTypeID, u32 elemWords, u32 capacit
 
     ListAlloc ret;
     ret.mRef = ref;
-    ret.mBlock = ListBlock{&headerFromBase(base), payloadFromBase(base)};
+    ret.mBlock = makeListBlock(base);
     return ret;
 }
 
@@ -136,7 +142,7 @@ bool Heap::resizeList(VMWord handle, u32 capacity, const RootProvider& roots)
 
     // Copy the fields needed after allocation, since allocation may invalidate block pointers.
     u32 oldLength = oldBlock.mHeader->mLength;
-    TypeID elementTypeID = oldBlock.mHeader->mTypeID;
+    TypeID elementTypeID = oldBlock.getElementTypeID();
     u32 elementWords = oldBlock.getElementWords();
 
     // No shrinking, require at least as many elements as we had before for now.
@@ -151,11 +157,15 @@ bool Heap::resizeList(VMWord handle, u32 capacity, const RootProvider& roots)
     u64 payloadWords = getListPayloadWords(elementWords, capacity);
 
     // Create the new block with the desired capacity and the old length, and zero everything.
-    HeapIndex newBase = alloc(BlockType::cList, elementTypeID, payloadWords, oldLength, elementWords, roots, true);
+    HeapIndex newBase = alloc(BlockType::cList, elementTypeID, payloadWords, roots, true);
     if (newBase == cInvalidHeapIndex)
     {
         return false;
     }
+
+    ListHeader& header = listHeaderFromBase(newBase);
+    header.mLength = oldLength;
+    header.mElementWords = elementWords;
 
     // If we have some old data, copy that in.
     if (oldLength != 0)
@@ -174,16 +184,22 @@ bool Heap::resizeList(VMWord handle, u32 capacity, const RootProvider& roots)
 
 Heap::MapAlloc Heap::allocateMap(TypeID keyTypeID, TypeID valueTypeID, u32 capacity, const RootProvider& roots)
 {
-    u32 keyWords = mTypeLayoutTable->getLayout(keyTypeID).getSizeAsValue();
-    u32 valueWords = mTypeLayoutTable->getLayout(valueTypeID).getSizeAsValue();
+    TypeLayoutWordCount keyWords = mTypeLayoutTable->getLayout(keyTypeID).getSizeAsValue();
+    TypeLayoutWordCount valueWords = mTypeLayoutTable->getLayout(valueTypeID).getSizeAsValue();
     u64 payloadWords = getMapPayloadWords(keyWords, valueWords, capacity);
 
     // Allocate stuff.
-    HeapIndex base = alloc(BlockType::cMap, keyTypeID, payloadWords, 0, 0, roots, true, valueTypeID);
+    HeapIndex base = alloc(BlockType::cMap, valueTypeID, payloadWords, roots, true);
     if (base == cInvalidHeapIndex)
     {
         return {};
     }
+
+    MapHeader& header = mapHeaderFromBase(base);
+    header.mLength = 0;
+    header.mKeyTypeID = keyTypeID;
+    header.mKeyWords = keyWords;
+    header.mValueWords = valueWords;
 
     // Here, we make a stable handle for the map in case the underlying memory is reallocated as the map grows.
     VMWord ref = makeHandle(base);
@@ -209,10 +225,10 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
 
     // Copy the fields needed after allocation, since allocation may invalidate block pointers.
     u32 oldLength = oldBlock.mHeader->mLength;
-    TypeID keyTypeID = oldBlock.mHeader->getMapKeyTypeID();
-    TypeID valueTypeID = oldBlock.mHeader->getMapValueTypeID();
-    u32 valueWords = oldBlock.getValueWords();
-    u32 keyWords = oldBlock.getKeyWords();
+    TypeID keyTypeID = oldBlock.getKeyTypeID();
+    TypeID valueTypeID = oldBlock.getValueTypeID();
+    TypeLayoutWordCount valueWords = oldBlock.mValueWords;
+    TypeLayoutWordCount keyWords = oldBlock.mKeyWords;
 
     // No shrinking, require at least as many elements as we had before for now.
     capacity = std::max(capacity, oldLength);
@@ -226,11 +242,17 @@ bool Heap::resizeMap(VMWord handle, u32 capacity, const RootProvider& roots)
     u64 payloadWords = getMapPayloadWords(keyWords, valueWords, capacity);
 
     // Create the new block with the desired capacity and the old length, and zero everything.
-    HeapIndex newBase = alloc(BlockType::cMap, keyTypeID, payloadWords, oldLength, 0, roots, true, valueTypeID);
+    HeapIndex newBase = alloc(BlockType::cMap, valueTypeID, payloadWords, roots, true);
     if (newBase == cInvalidHeapIndex)
     {
         return false;
     }
+
+    MapHeader& header = mapHeaderFromBase(newBase);
+    header.mLength = oldLength;
+    header.mKeyTypeID = keyTypeID;
+    header.mKeyWords = keyWords;
+    header.mValueWords = valueWords;
 
     // If we have some old data, rehash it into the new bucket array.
     if (oldLength != 0)
@@ -259,21 +281,21 @@ bool Heap::resolvePayloadAddress(VMWord address, Block& out)
 
     // Get the heap index from the address.
     HeapIndex payloadIndex = getHeapPayload(address);
-    if (payloadIndex < cBlockHeaderWords || payloadIndex >= mOwner.size())
+    if (payloadIndex >= mOwner.size())
     {
         return false;
     }
 
-    // Get the base from the payload index.
-    HeapIndex base = payloadIndex - cBlockHeaderWords;
-    if (mOwner[payloadIndex] != base)
+    // Recover the allocation base, since payload offsets depend on the block type.
+    HeapIndex base = mOwner[payloadIndex];
+    if (base == cInvalidHeapIndex)
     {
         return false;
     }
 
     // Get the block, make sure it's valid.
     BlockHeader& header = headerFromBase(base);
-    if (header.mBlockType == BlockType::cFree)
+    if (payloadIndex != base + getBlockHeaderWords(header.mBlockType))
     {
         return false;
     }
@@ -282,6 +304,20 @@ bool Heap::resolvePayloadAddress(VMWord address, Block& out)
     out.mHeader = &header;
     out.mPayload = payloadFromBase(base);
 
+    return true;
+}
+
+bool Heap::resolveStringAddress(VMWord address, StringBlock& out)
+{
+    out = StringBlock{};
+
+    Block block;
+    if (resolvePayloadAddress(address, block) == false || block.mHeader->mBlockType != BlockType::cString)
+    {
+        return false;
+    }
+
+    out = StringBlock{reinterpret_cast<StringHeader*>(block.mHeader), block.mPayload};
     return true;
 }
 
@@ -336,7 +372,7 @@ bool Heap::resolveListHandle(VMWord handle, HeapIndex& outBase, ListBlock& out)
 
     // Make a list block view out of it.
     outBase = base;
-    out = ListBlock{&header, payloadFromBase(base)};
+    out = makeListBlock(base);
 
     return true;
 }
@@ -367,15 +403,18 @@ bool Heap::resolveMapHandle(VMWord handle, HeapIndex& outBase, MapBlock& out)
     return true;
 }
 
+ListBlock Heap::makeListBlock(HeapIndex base)
+{
+    return ListBlock{&listHeaderFromBase(base), payloadFromBase(base)};
+}
+
 MapBlock Heap::makeMapBlock(HeapIndex base)
 {
     // For a map block, we need the start of the header and the start of the payload.
-    BlockHeader& header = headerFromBase(base);
+    MapHeader& header = mapHeaderFromBase(base);
     VMWord* payload = payloadFromBase(base);
-    // Cache the key and value widths from their type layouts.
-    TypeLayoutWordCount keyWords = mTypeLayoutTable->getLayout(header.getMapKeyTypeID()).getSizeAsValue();
-    TypeLayoutWordCount valueWords = mTypeLayoutTable->getLayout(header.getMapValueTypeID()).getSizeAsValue();
-    return MapBlock{&header, payload, keyWords, valueWords};
+    // Cache the persistent widths for use throughout the operation.
+    return MapBlock{&header, payload, header.mKeyWords, header.mValueWords};
 }
 
 void Heap::collect(const Roots& roots)
@@ -445,33 +484,18 @@ bool Heap::resolveHandleToBase(VMWord handle, HeapIndex& outBase) const
     return true;
 }
 
-HeapIndex Heap::alloc(BlockType t,
-                      TypeID typeID,
-                      u64 requestedPayloadWords,
-                      u32 length,
-                      u32 elementWords,
-                      const RootProvider& roots,
-                      bool zero,
-                      TypeID mapValueTypeID)
+HeapIndex Heap::alloc(BlockType t, TypeID typeID, u64 requestedPayloadWords, const RootProvider& roots, bool zero)
 {
-    // If we requested more than the maximum payload size, bail.
-    u32 maxPayloadWords = mOptions.mMaxHeapWords - cBlockHeaderWords;
-    if (requestedPayloadWords > maxPayloadWords)
+    // Include the complete header and minimum data capacity before checking the heap limit.
+    u32 headerWords = getBlockHeaderWords(t);
+    u64 payloadWords = std::max(requestedPayloadWords, static_cast<u64>(cMinPayloadWords));
+    u64 requestedTotalWords = headerWords + payloadWords;
+    if (requestedTotalWords > mOptions.mMaxHeapWords)
     {
         return cInvalidHeapIndex;
     }
 
-    // Make sure we don't exceed the maximum element size allowed (which really shouldn't happen).
-    if (elementWords > BlockHeader::cElementInfoWordCountMask)
-    {
-        return cInvalidHeapIndex;
-    }
-
-    // We enforce at least 1 word of payload.
-    u32 payloadWords = static_cast<u32>(std::max(requestedPayloadWords, static_cast<u64>(cMinPayloadWords)));
-
-    // The total size is the header size plus the payload size.
-    u32 totalWords = cBlockHeaderWords + payloadWords;
+    u32 totalWords = static_cast<u32>(requestedTotalWords);
 
     // If we're beyond the threshold for collection, collect.
     bool collected = static_cast<u64>(mAllocWordsSinceGC) + totalWords > mNextGCThresholdWords;
@@ -513,7 +537,7 @@ HeapIndex Heap::alloc(BlockType t,
     }
 
     // If we're here, we're good to go and can write the header and owner range.
-    writeHeader(base, t, typeID, allocatedWords, length, elementWords, mapValueTypeID);
+    writeHeader(base, t, typeID, allocatedWords);
     setOwnerRange(base, allocatedWords);
 
     if (zero)
@@ -521,7 +545,7 @@ HeapIndex Heap::alloc(BlockType t,
         // Get the payload pointer.
         VMWord* dst = payloadFromBase(base);
         // Find out how many words that block is (minus the block header words).
-        u32 allocatedPayloadWords = allocatedWords - cBlockHeaderWords;
+        u32 allocatedPayloadWords = allocatedWords - headerWords;
         // Finally zero it.
         std::memset(dst, 0, allocatedPayloadWords * sizeof(VMWord));
     }
@@ -639,7 +663,7 @@ bool Heap::appendFreeBlock(u32 words)
     // We now create a new block starting from the end of the current heap index (== oldSize).
     HeapIndex growBase = static_cast<HeapIndex>(oldSize);
     // Write the header as a free block.
-    writeHeader(growBase, BlockType::cFree, 0, words, 0, 0);
+    writeHeader(growBase, BlockType::cFree, 0, words);
     // Link the new free block to the current free list head.
     setNextFreeBlock(growBase, mFreeListHead);
     // The new block becomes the free list head.
@@ -648,42 +672,14 @@ bool Heap::appendFreeBlock(u32 words)
     return true;
 }
 
-void Heap::writeHeader(HeapIndex base,
-                       BlockType t,
-                       TypeID typeID,
-                       u32 totalWords,
-                       u32 length,
-                       u32 elementWords,
-                       TypeID mapValueTypeID)
+void Heap::writeHeader(HeapIndex base, BlockType t, TypeID typeID, u32 totalWords)
 {
     // Get the header address and write the data to it.
-    SIMLANG_ASSERTM(elementWords <= BlockHeader::cElementInfoWordCountMask,
-                    "Heap element size does not fit packed header.");
-
     BlockHeader& h = headerFromBase(base);
     h.mBlockType = t;
-    h.mTypeID = t == BlockType::cMap ? 0 : typeID;
+    h.mTypeID = typeID;
     h.mSize = totalWords;
-    h.mLength = length;
     h.mMarked = false;
-    switch (t)
-    {
-        case BlockType::cList:
-        {
-            h.setListElementInfo(elementWords);
-            break;
-        }
-        case BlockType::cMap:
-        {
-            h.setMapTypeIDs(typeID, mapValueTypeID);
-            break;
-        }
-        default:
-        {
-            h.clearElementInfo();
-            break;
-        }
-    }
 }
 
 void Heap::setOwnerRange(HeapIndex base, u32 totalWords)
@@ -850,8 +846,8 @@ void Heap::scanBlockPrecise(HeapIndex base)
 
     if (header.mBlockType == BlockType::cList)
     {
-        ListBlock list{&header, payload};
-        const u32 len = header.mLength;
+        ListBlock list = makeListBlock(base);
+        const u32 len = list.mHeader->mLength;
         if (len == 0)
         {
             return;
@@ -905,15 +901,15 @@ void Heap::scanBlockPrecise(HeapIndex base)
 
     if (header.mBlockType == BlockType::cMap)
     {
-        if (header.mLength == 0)
+        if (mapHeaderFromBase(base).mLength == 0)
         {
             return;
         }
 
         MapBlock map = makeMapBlock(base);
 
-        const TypeLayout& keyLayout = mTypeLayoutTable->getLayout(header.getMapKeyTypeID());
-        const TypeLayout& valueLayout = mTypeLayoutTable->getLayout(header.getMapValueTypeID());
+        const TypeLayout& keyLayout = mTypeLayoutTable->getLayout(map.getKeyTypeID());
+        const TypeLayout& valueLayout = mTypeLayoutTable->getLayout(map.getValueTypeID());
         bool keyReference = keyLayout.getKind() == TypeLayout::Kind::cReference;
         bool valueReference = valueLayout.getKind() == TypeLayout::Kind::cReference;
 
@@ -987,8 +983,7 @@ u32 Heap::sweepAndMerge()
         {
             header.mBlockType = BlockType::cFree;
             header.mTypeID = 0;
-            header.mLength = 0;
-            header.clearElementInfo();
+            std::fill_n(mOwner.data() + base, header.mSize, cInvalidHeapIndex);
 
             // Also reset the mark for good measure.
             header.mMarked = false;

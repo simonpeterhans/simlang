@@ -19,36 +19,46 @@ enum class BlockType : u8
 
 struct BlockHeader
 {
-    static constexpr u32 cElementInfoWordCountMask = 0xFFFFU;
-    static constexpr u32 cMapValueTypeIDShift = 16;
-
     u32 mSize = 0;                           // 4b (Header AND data.)
-    TypeID mTypeID = 0;                      // 2b (Object type OR list element type; unused for maps.)
+    TypeID mTypeID = 0;                      // 2b (Object type, list element type, or map value type.)
     BlockType mBlockType = BlockType::cFree; // 1b
     bool mMarked = false;                    // 1b (Could also be flags, but we only need one as of now.)
-    u32 mLength = 0;                         // 4b (List/map length OR string length.)
-    u32 mElementInfo = 0;                    // 4b (List element word count OR packed map K/V type IDs.)
-
-    void clearElementInfo() { mElementInfo = 0; }
-
-    // Lists only use the element word count.
-
-    u32 getListElementWords() const { return mElementInfo & cElementInfoWordCountMask; }
-    void setListElementInfo(u32 elementWords) { mElementInfo = elementWords & cElementInfoWordCountMask; }
-
-    // Maps store the key type ID in the low 16 bits and the value type ID in the high 16 bits.
-
-    TypeID getMapKeyTypeID() const { return static_cast<TypeID>(mElementInfo); }
-    TypeID getMapValueTypeID() const { return static_cast<TypeID>(mElementInfo >> cMapValueTypeIDShift); }
-    void setMapTypeIDs(TypeID keyTypeID, TypeID valueTypeID)
-    {
-        mElementInfo = keyTypeID | (static_cast<u32>(valueTypeID) << cMapValueTypeIDShift);
-    }
 };
 
-static_assert(sizeof(BlockHeader) == 4 * sizeof(VMWord), "Heap block header must be four VM words!");
+struct StringHeader
+{
+    BlockHeader mBlock;
+    u32 mLength = 0; // Bytes, excluding the terminator.
+};
 
-inline constexpr u32 cBlockHeaderWords = sizeof(BlockHeader) / sizeof(VMWord);
+struct ListHeader
+{
+    BlockHeader mBlock;
+    u32 mLength = 0;
+    u32 mElementWords = 0;
+};
+
+struct MapHeader
+{
+    BlockHeader mBlock;
+    u32 mLength = 0;
+    TypeID mKeyTypeID = 0;
+    TypeLayoutWordCount mKeyWords = 0;
+    TypeLayoutWordCount mValueWords = 0;
+};
+
+constexpr u32 getBlockHeaderWords(BlockType type)
+{
+    switch (type)
+    {
+        case BlockType::cFree:
+        case BlockType::cObject: return sizeof(BlockHeader) / sizeof(VMWord);
+        case BlockType::cString: return sizeof(StringHeader) / sizeof(VMWord);
+        case BlockType::cList: return sizeof(ListHeader) / sizeof(VMWord);
+        case BlockType::cMap: return sizeof(MapHeader) / sizeof(VMWord);
+    }
+    return 0;
+}
 
 struct Block
 {
@@ -58,7 +68,7 @@ struct Block
 
 struct StringBlock
 {
-    BlockHeader* mHeader = nullptr;
+    StringHeader* mHeader = nullptr;
     VMWord* mPayload = nullptr;
 
     // Convert byte length to payload word count.
@@ -77,14 +87,18 @@ struct StringBlock
 
 struct ListBlock
 {
-    BlockHeader* mHeader = nullptr;
+    ListHeader* mHeader = nullptr;
     VMWord* mPayload = nullptr;
 
     // List structure: [elem0Word0, elem0Word1, ..., elem0WordN, elem1Word0, ...]
 
-    u32 getElementWords() const { return mHeader->getListElementWords(); }
+    TypeID getElementTypeID() const { return mHeader->mBlock.mTypeID; }
+    u32 getElementWords() const { return mHeader->mElementWords; }
     // The capacity is the number of elements we can fit in the payload.
-    u32 getCapacity() const { return (mHeader->mSize - cBlockHeaderWords) / getElementWords(); }
+    u32 getCapacity() const
+    {
+        return (mHeader->mBlock.mSize - getBlockHeaderWords(BlockType::cList)) / getElementWords();
+    }
 
     VMWord* getElement(u32 index) { return mPayload + static_cast<usize>(index) * getElementWords(); }
     const VMWord* getElement(u32 index) const { return mPayload + static_cast<usize>(index) * getElementWords(); }
@@ -138,19 +152,21 @@ inline constexpr u32 cMapControlWords = 1;
 
 struct MapBlock
 {
-    BlockHeader* mHeader = nullptr;
+    MapHeader* mHeader = nullptr;
     VMWord* mPayload = nullptr;
     TypeLayoutWordCount mKeyWords = 0;
     TypeLayoutWordCount mValueWords = 0;
 
     // Bucket structure: [control, complete key words, complete value words].
     // The control word stores the occupied bit plus the stored 31-bit key hash.
+    TypeID getKeyTypeID() const { return mHeader->mKeyTypeID; }
+    TypeID getValueTypeID() const { return mHeader->mBlock.mTypeID; }
     u32 getKeyWords() const { return mKeyWords; }
     u32 getValueWords() const { return mValueWords; }
     u32 getBucketWords() const { return cMapControlWords + getKeyWords() + getValueWords(); }
 
     // The payload is the size of the block minus the header.
-    u32 getPayloadWords() const { return mHeader->mSize - cBlockHeaderWords; }
+    u32 getPayloadWords() const { return mHeader->mBlock.mSize - getBlockHeaderWords(BlockType::cMap); }
 
     // The bucket capacity is the payload divided by the bucket size.
     u32 getBucketCapacity() const { return getPayloadWords() / getBucketWords(); }
