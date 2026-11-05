@@ -87,18 +87,6 @@ bool ResolutionVisitor::visitIdentifier(IdentifierNode* node)
             return true;
         }
 
-        if (mCurrentFieldDefault != nullptr)
-        {
-            // If we're currently inside of a field default expression, restrict access to other fields (or methods).
-            if (symbol->mSymbolType == SymbolType::cMemberVariable ||
-                symbol->mSymbolType == SymbolType::cMemberFunction)
-            {
-                mCtx.report<cInvalidFieldDefaultReference>(node->mSourceRange,
-                                                           mCurrentFieldDefault->mIdentifier,
-                                                           symbol->mIdentifier);
-            }
-        }
-
         return true;
     }
 
@@ -338,11 +326,6 @@ bool ResolutionVisitor::visitVariableDeclarationStatement(VariableDeclarationSta
     // Finally, visit the init expression if we have one.
     if (node->mInit != nullptr)
     {
-        // If we are declaring a member variable, we need to indicate that.
-        // The subsequent expression of the initializer cannot refer to other fields (or methods).
-        Symbol* fieldDefault = (node->mSymbol->mSymbolType == SymbolType::cMemberVariable) ? node->mSymbol : nullptr;
-        ScopedValueBinder fieldDefaultScope{mCurrentFieldDefault, fieldDefault};
-
         // Mark the variable as initializing since we disallow self-reference during init.
         mInitializingSymbols.push_back(node->mSymbol);
 

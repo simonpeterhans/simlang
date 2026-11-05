@@ -233,26 +233,10 @@ void Parser::parseMemberSpecifiers(FlagSet<NodeFlagType>& flags)
 
 StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
 {
-    // (var | const) identifier [: type] [= expression]
+    // (var | const) identifier [: type] = expression
     // (var | const) '(' identifier (',' identifier)+ ')' '=' expression
 
-    // Keep the first token for range purposes.
-    Token startToken = getCurrentToken();
-    FlagSet<NodeFlagType> flags;
-
-    // Consume declaration and mutability stuff.
-    if (tryConsume(TokenType::cVar))
-    {
-        flags.set(cStmtIsMutable);
-    }
-    else if (tryConsume(TokenType::cConst) == false)
-    {
-        flags.set(cStmtIsMutable);
-        mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
-                                      std::array{TokenType::cConst, TokenType::cVar},
-                                      getCurrentTokenText());
-        return nullptr;
-    }
+    Token startToken = consume();
 
     // Check if we have a '(' for multi-var declarations.
     if (check(TokenType::cLeftParen))
@@ -262,18 +246,6 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
 
     Token nameToken = cErrorToken;
     TypeSpecifierNode* typeSpec = nullptr;
-    ExpressionNode* init = nullptr;
-
-    auto buildNode = [&](SourceRange range)
-    {
-        auto* node = mCtx.create<VariableDeclarationStatementNode>(range,
-                                                                   nameToken.getRange(),
-                                                                   nameToken.mIdentifier,
-                                                                   typeSpec,
-                                                                   init);
-        node->mFlags = flags;
-        return node;
-    };
 
     // Parse the variable name.
     if (expect(TokenType::cIdentifier, &nameToken, true) == false)
@@ -291,43 +263,26 @@ StatementNode* Parser::parseVariableDeclaration(bool consumeSemi)
         }
     }
 
-    // If we're not in a type declaration, expect "==".
-    if (mInTypeDeclaration == false || check(TokenType::cAss))
+    // Variables always require an initializer.
+    if (tryConsume(TokenType::cAss) == false)
     {
-        // Consume the '='.
-        if (tryConsume(TokenType::cAss) == false)
-        {
-            if (mInTypeDeclaration == false)
-            {
-                mCtx.report<cVariableInitializerRequired>(nameToken.getRange(), nameToken.mIdentifier);
-            }
-            else
-            {
-                mCtx.report<cUnexpectedToken>(getCurrentTokenRange(), TokenType::cAss, getCurrentTokenText());
-            }
-            return nullptr;
-        }
-
-        // Parse the initializer expression.
-        init = parseExpression();
-        if (init == nullptr)
-        {
-            return nullptr;
-        }
+        mCtx.report<cVariableInitializerRequired>(nameToken.getRange(), nameToken.mIdentifier);
+        return nullptr;
     }
 
-    SourceRange range = makeRangeToPrevious(startToken);
-    if (consumeSemi)
+    ExpressionNode* init = parseExpression();
+    if (init == nullptr || (consumeSemi && expectSemi() == false))
     {
-        if (expectSemi() == false)
-        {
-            return nullptr;
-        }
-
-        range = makeRangeToPrevious(startToken);
+        return nullptr;
     }
 
-    return buildNode(range);
+    auto* node = mCtx.create<VariableDeclarationStatementNode>(makeRangeToPrevious(startToken),
+                                                               nameToken.getRange(),
+                                                               nameToken.mIdentifier,
+                                                               typeSpec,
+                                                               init);
+    node->mFlags.set(cStmtIsMutable, startToken.mType == TokenType::cVar);
+    return node;
 }
 
 StatementNode* Parser::parseMultiVariableDeclaration(Token startToken, bool consumeSemi)

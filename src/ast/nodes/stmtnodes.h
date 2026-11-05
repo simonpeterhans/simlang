@@ -153,9 +153,6 @@ struct FunctionDeclarationStatementNode : StatementNode
     // Resolved symbol and scope.
     Symbol* mSymbol = nullptr;
     Scope* mScope = nullptr;
-
-    // Fields assigned in the initializer (constructor) body.
-    ArrayView<Symbol*> mInitializerAssignedFields;
 };
 
 enum class TypeDeclarationKind : u8

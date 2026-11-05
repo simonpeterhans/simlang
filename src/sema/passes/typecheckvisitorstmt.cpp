@@ -193,13 +193,6 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
     // Check whether our own type is implicit or explicit.
     if (node->mTypeSpec == nullptr)
     {
-        if (initType == nullptr)
-        {
-            mCtx.report<cCannotInferType>(node->mIdentifierRange, node->mIdentifier);
-            node->mSymbol->mType = getErrorType();
-            return true;
-        }
-
         // Null cannot be implicit.
         if (initType->mKind == TypeKind::cNull)
         {

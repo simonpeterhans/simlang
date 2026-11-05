@@ -49,17 +49,9 @@ public:
             return false;
         }
 
-        for (const CallArgument& arg : n->mInitializerArguments)
+        for (const CallArgument& arg : n->mArgs)
         {
             if (this->visit(arg.mValue) == false)
-            {
-                return false;
-            }
-        }
-
-        for (FieldInitializer* init : n->mFieldInitializers)
-        {
-            if (this->visit(init->mValue) == false)
             {
                 return false;
             }

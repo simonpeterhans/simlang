@@ -101,9 +101,9 @@ bool DeclCollectorVisitor::visitForStatement(ForStatementNode* node)
 
 bool DeclCollectorVisitor::visitMultiVariableDeclarationStatement(MultiVariableDeclarationStatementNode* node)
 {
-    // We reject multi-variable declarations inside of structs or classes.
-    if (mCurrentSymbol == nullptr || mCurrentSymbol->mSymbolType == SymbolType::cStruct ||
-        mCurrentSymbol->mSymbolType == SymbolType::cClass)
+    // Don't allow multi-variable declarations if they're on the top level.
+    // Struct/class level multi-variable declarations are already rejected by the parser.
+    if (mCurrentSymbol == nullptr)
     {
         mCtx.report<cInvalidMultiVariableDeclarationScope>(node->mSourceRange);
         return true;
@@ -286,6 +286,32 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
         }
     }
 
+    // Find the initializer for anything but interfaces.
+    FunctionDeclarationStatementNode* initializer = nullptr;
+    if (node->isInterface() == false)
+    {
+        // Go through all members and find the initializer.
+        for (StatementNode* member : node->mMembers)
+        {
+            if (member->mNodeType == NodeType::cFunctionDeclarationStatement)
+            {
+                auto* function = static_cast<FunctionDeclarationStatementNode*>(member);
+                if (function->mIsInitMethod)
+                {
+                    initializer = function;
+                    break;
+                }
+            }
+        }
+
+        // If we have none, complain.
+        if (initializer == nullptr)
+        {
+            mCtx.report<cMissingInitializer>(node->mIdentifierRange, node->mIdentifier);
+            return true;
+        }
+    }
+
     // Otherwise, we're good to go and can create a new symbol.
     // If this node is the actual template declaration, register it as such instead of doing the usual stuff.
     if (node->isTemplate())
@@ -358,25 +384,10 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
     // Store the stuff in the member list of the symbol.
     symbol->mMembers = makeArrayView(mCtx.mAllocator, members);
 
-    // Find the initializer across the collected member list.
-    if (node->isClass())
+    if (node->isInterface() == false)
     {
-        auto* classType = static_cast<AggregateType*>(symbol->mType);
-
-        for (Symbol* member : symbol->mMembers)
-        {
-            if (member->mSymbolType != SymbolType::cMemberFunction)
-            {
-                continue;
-            }
-
-            auto* fun = static_cast<FunctionDeclarationStatementNode*>(member->mDeclNode);
-            if (fun->mIsInitMethod)
-            {
-                classType->mInitMethodSymbol = member;
-                break;
-            }
-        }
+        auto* aggregateType = static_cast<AggregateType*>(symbol->mType);
+        aggregateType->mInitMethodSymbol = initializer->mSymbol;
     }
 
     return true;

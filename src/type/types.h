@@ -168,10 +168,8 @@ struct AggregateType : Type
     bool mIsPrimitive = false;
 
     Symbol* mSymbol;
-
-    // Class init method. Only used for class types.
+    // Struct or class initializer, set during declaration collection.
     Symbol* mInitMethodSymbol = nullptr;
-
     AggregateLayout* mLayout = nullptr;
     ArrayView<InterfaceImplementation> mInterfaces;
 };

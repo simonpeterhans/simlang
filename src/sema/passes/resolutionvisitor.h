@@ -45,7 +45,6 @@ private:
 
     Symbol* mCurrentSymbol = nullptr;
     Symbol* mCurrentThisOwner = nullptr;
-    Symbol* mCurrentFieldDefault = nullptr;
     TranslationUnitNode* mCurrentTranslationUnit = nullptr;
     std::vector<Symbol*> mInitializingSymbols;
 };

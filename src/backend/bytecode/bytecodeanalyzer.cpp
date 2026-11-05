@@ -211,6 +211,11 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             return pushStackWords(height, 1);
         }
 
+        case OpCode::cNewStruct:
+        {
+            return pushStackWords(height, static_cast<u32>(op.as.mNewStruct.mSize) + 1U);
+        }
+
         case OpCode::cLoadLocalN:
         {
             return pushStackWords(height, op.as.mLoadLocalN.mSize);

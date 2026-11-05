@@ -87,7 +87,6 @@ struct TypeSpecifierNode;
     set(TokenType::cIdentifier,  &Parser::parseIdentifier,             nullptr,                    Precedence::cNone);
     set(TokenType::cCast,        &Parser::parseCast,                   nullptr,                    Precedence::cNone);
     set(TokenType::cThis,        &Parser::parseThis,                   nullptr,                    Precedence::cNone);
-    set(TokenType::cMake,        &Parser::parseMake,                   nullptr,                    Precedence::cUnaryPost);
     set(TokenType::cNew,         &Parser::parseNew,                    nullptr,                    Precedence::cUnaryPost);
     set(TokenType::cFun,         &Parser::parseLambda,                 nullptr,                    Precedence::cNone);
 
@@ -911,26 +910,9 @@ ExpressionNode* Parser::parseParen()
     return expr;
 }
 
-ExpressionNode* Parser::parseMake()
-{
-    // make ValueType { field0: value0, field1: value1 }
-
-    // Consume the "make".
-    Token makeToken = consume();
-
-    // Parse the type specifier.
-    TypeSpecifierNode* typeSpec = parseTypeSpec();
-    if (typeSpec == nullptr)
-    {
-        return nullptr;
-    }
-
-    return parseObjectConstruction(makeToken, typeSpec, ConstructionKind::cValue);
-}
-
 ExpressionNode* Parser::parseNew()
 {
-    // new ReferenceType(arg0, arg1)
+    // new Type(arg0, arg1, ...)
 
     // Consume the "new".
     Token newToken = consume();
@@ -942,7 +924,21 @@ ExpressionNode* Parser::parseNew()
         return nullptr;
     }
 
-    return parseClassConstruction(newToken, typeSpec);
+    // Consume the '('.
+    if (expect(TokenType::cLeftParen, nullptr, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Parse the argument list.
+    std::vector<CallArgument> args;
+    if (parseArgumentList(args) == false)
+    {
+        return nullptr;
+    }
+
+    ArrayView<CallArgument> argsView = makeArrayView(mCtx.mAllocator, args);
+    return mCtx.create<NewObjectNode>(makeRangeToPrevious(newToken), typeSpec, argsView);
 }
 
 bool Parser::parseArgumentList(std::vector<CallArgument>& args)
@@ -1009,132 +1005,6 @@ bool Parser::parseArgumentList(std::vector<CallArgument>& args)
         }
 
         return false;
-    }
-}
-
-ExpressionNode* Parser::parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec)
-{
-    // (e0, e1, ...) (called from new ...)
-
-    // We open with a '(' or this is an error.
-    if (expect(TokenType::cLeftParen, nullptr, true) == false)
-    {
-        return nullptr;
-    }
-
-    // Parse the argument list.
-    std::vector<CallArgument> args;
-    if (parseArgumentList(args) == false)
-    {
-        return nullptr;
-    }
-
-    ArrayView<FieldInitializer*> fieldsView;
-    ArrayView<CallArgument> argsView = makeArrayView(mCtx.mAllocator, args);
-
-    return mCtx.create<NewObjectNode>(makeRangeToPrevious(constructionToken),
-                                      typeSpec,
-                                      fieldsView,
-                                      argsView,
-                                      ConstructionKind::cReference);
-}
-
-ExpressionNode* Parser::parseObjectConstruction(Token constructionToken,
-                                                TypeSpecifierNode* typeSpec,
-                                                ConstructionKind constructionKind)
-{
-    // {}
-    // { i0: expr, i1: expr, ... }
-    // { i0, i1, ... }
-
-    std::vector<FieldInitializer*> fields;
-
-    auto buildNode = [&]()
-    {
-        ArrayView<FieldInitializer*> fieldsView = makeArrayView(mCtx.mAllocator, fields);
-        ArrayView<CallArgument> argsView;
-
-        return mCtx.create<NewObjectNode>(makeRangeToPrevious(constructionToken),
-                                          typeSpec,
-                                          fieldsView,
-                                          argsView,
-                                          constructionKind);
-    };
-
-    // We open with a '{' or this is an error.
-    if (expect(TokenType::cLeftBrace, nullptr, true) == false)
-    {
-        return nullptr;
-    }
-
-    // Check if we're already done.
-    if (check(TokenType::cRightBrace))
-    {
-        // Consume the '}'.
-        consume();
-        return buildNode();
-    }
-
-    while (true)
-    {
-        // Parse the identifier.
-        Token identifierToken = cErrorToken;
-        if (expect(TokenType::cIdentifier, &identifierToken, true) == false)
-        {
-            return nullptr;
-        }
-
-        // Parse the expression.
-        ExpressionNode* value = nullptr;
-        if (tryConsume(TokenType::cColon))
-        {
-            value = parseExpression();
-        }
-        else
-        {
-            // Allow something like make Point { x, y } if the identifiers have the same name as the members.
-            value = mCtx.create<IdentifierNode>(identifierToken.getRange(), identifierToken.mIdentifier);
-        }
-
-        if (value == nullptr)
-        {
-            return nullptr;
-        }
-
-        SourceRange fieldRange = identifierToken.makeRangeTo(value->mSourceRange);
-        fields.push_back(
-            mCtx.create<FieldInitializer>(fieldRange, identifierToken.getRange(), identifierToken.mIdentifier, value));
-
-        // Find out if we have more.
-        if (check(TokenType::cComma))
-        {
-            // Consume the ','.
-            consume();
-            continue;
-        }
-
-        // Find out if we're done.
-        if (check(TokenType::cRightBrace))
-        {
-            // Consume the '}'.
-            consume();
-            return buildNode();
-        }
-
-        TokenType currentType = getCurrentTokenType();
-        if (currentType == TokenType::cSemiColon || currentType == TokenType::cRightParen ||
-            currentType == TokenType::cEOF)
-        {
-            mCtx.report<cMissingClosingDelim>(getCurrentTokenRange(), TokenType::cRightBrace, currentType);
-        }
-        else
-        {
-            mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
-                                          std::array{TokenType::cComma, TokenType::cRightBrace},
-                                          getCurrentTokenText());
-        }
-
-        return nullptr;
     }
 }
 

@@ -50,14 +50,9 @@ bool ConstFoldVisitor::visitFormatString(FormatStringNode* node)
 
 bool ConstFoldVisitor::visitNewObject(NewObjectNode* node)
 {
-    for (CallArgument& arg : node->mInitializerArguments)
+    for (CallArgument& arg : node->mArgs)
     {
         foldExpr(arg.mValue);
-    }
-
-    for (FieldInitializer* init : node->mFieldInitializers)
-    {
-        foldExpr(init->mValue);
     }
 
     return true;

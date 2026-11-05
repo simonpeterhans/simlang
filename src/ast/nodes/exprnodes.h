@@ -152,28 +152,6 @@ struct FormatStringNode : ExpressionNode
     ArrayView<ExpressionNode*> mArgs;
 };
 
-struct FieldInitializer
-{
-    explicit FieldInitializer(SourceRange range,
-                              SourceRange identifierRange,
-                              Identifier* identifier,
-                              ExpressionNode* value)
-        : mSourceRange(range)
-        , mIdentifierRange(identifierRange)
-        , mIdentifier(identifier)
-        , mValue(value)
-    {
-    }
-
-    SourceRange mSourceRange;
-    SourceRange mIdentifierRange;
-    Identifier* mIdentifier;
-    ExpressionNode* mValue;
-
-    // The resolved field the initializer is initializing.
-    Symbol* mResolvedField = nullptr;
-};
-
 struct CallArgument
 {
     SourceRange mSourceRange;
@@ -181,33 +159,19 @@ struct CallArgument
     bool mIsInOut = false;
 };
 
-enum class ConstructionKind : u8
-{
-    cValue,
-    cReference
-};
-
 struct NewObjectNode : ExpressionNode
 {
-    explicit NewObjectNode(SourceRange range,
-                           TypeSpecifierNode* typeSpecifier,
-                           ArrayView<FieldInitializer*> fieldInitializers,
-                           ArrayView<CallArgument> initializerArguments,
-                           ConstructionKind constructionKind)
+    explicit NewObjectNode(SourceRange range, TypeSpecifierNode* typeSpecifier, ArrayView<CallArgument> args)
         : ExpressionNode(NodeType::cNewObject, range)
         , mTypeSpecifier(typeSpecifier)
-        , mFieldInitializers(fieldInitializers)
-        , mInitializerArguments(initializerArguments)
-        , mConstructionKind(constructionKind)
+        , mArgs(args)
     {
     }
 
     TypeSpecifierNode* mTypeSpecifier;
-    ArrayView<FieldInitializer*> mFieldInitializers;
-    ArrayView<CallArgument> mInitializerArguments;
-    ConstructionKind mConstructionKind = ConstructionKind::cReference;
+    ArrayView<CallArgument> mArgs;
 
-    // The selected class init method.
+    // The selected initializer (unused for lists/maps).
     Symbol* mInitMethodSymbol = nullptr;
 };
 

@@ -2,7 +2,6 @@
 
 #include <limits>
 #include <string_view>
-#include <vector>
 
 #include "ast/binaryop.h"
 #include "ast/nodes/exprnodes.h"
@@ -14,7 +13,6 @@
 #include "type/typekind.h"
 #include "type/types.h"
 #include "util/arena.h"
-#include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
 #include "util/numeric.h"
@@ -259,64 +257,11 @@ bool ConstEvalVisitor::visitFormatString(FormatStringNode*)
     return false;
 }
 
-bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
+bool ConstEvalVisitor::visitNewObject(NewObjectNode*)
 {
-    // Only structs can be consteval.
-    if (node->mResolvedType->mKind != TypeKind::cStruct)
-    {
-        return false;
-    }
-
-    auto* structType = static_cast<AggregateType*>(node->mResolvedType);
-
-    std::vector<ConstFieldValue> fields;
-    fields.reserve(structType->mSymbol->mMembers.size());
-
-    for (Symbol* member : structType->mSymbol->mMembers)
-    {
-        if (member->mSymbolType != SymbolType::cMemberVariable)
-        {
-            continue;
-        }
-
-        // Go through all field initializers to look up our current member.
-        ExpressionNode* valueExpr = nullptr;
-        for (FieldInitializer* init : node->mFieldInitializers)
-        {
-            if (init->mResolvedField == member)
-            {
-                valueExpr = init->mValue;
-                break;
-            }
-        }
-
-        // If we have no match, use the initializer from the declaration.
-        if (valueExpr == nullptr)
-        {
-            auto* decl = static_cast<VariableDeclarationStatementNode*>(member->mDeclNode);
-            valueExpr = decl->mInit;
-        }
-
-        // See if we can evaluate whatever we have now.
-        ConstValue fieldValue;
-        ConstEvalVisitor fieldEvaluator{mAllocator};
-        if (fieldEvaluator.evaluate(valueExpr, fieldValue) == false)
-        {
-            // If not, the whole thing isn't consteval.
-            return false;
-        }
-
-        ConstValue* storedValue = mAllocator.create<ConstValue>(fieldValue);
-        fields.push_back(ConstFieldValue{member, storedValue});
-    }
-
-    // If we collected all of them, make the struct based on the values that we got.
-    auto* structValue = mAllocator.create<ConstStructValue>();
-    structValue->mType = structType;
-    structValue->mFields = makeArrayView(mAllocator, fields);
-
-    mValue = ConstValue::makeStruct(structValue);
-    return true;
+    // Constructor calls are evaluated at runtime.
+    // This is subject to change later on (since we need simple constructors to be const evaluable).
+    return false;
 }
 
 bool ConstEvalVisitor::visitFunctionCall(FunctionCallNode*)

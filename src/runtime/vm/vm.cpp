@@ -2170,6 +2170,23 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(NewStruct)
+    {
+        // Code:  NewStruct(size: OpWordCount)
+        // Stack: [...] -> [addr, zeroN-1, ..., zero0, ...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // Reserve zeroed inline struct storage and its initializer receiver on the stack.
+        u32 resultIndex = static_cast<u32>(sp - stackBase);
+        std::memset(sp, 0, static_cast<usize>(size) * sizeof(VMWord));
+
+        // Push the storage onto the stack.
+        sp += size;
+        // Make the address to the start of the zeroes and push that too.
+        *sp++ = makeStackRefAddress(resultIndex);
+
+        VM_END_OP();
+    }
     VM_OP(NewClosure)
     {
         // Code:  NewClosure(index: FunctionIdx)

@@ -1,5 +1,4 @@
 #include "ast/nodes/exprnodes.h"
-#include "ast/nodes/stmtnodes.h"
 #include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/typeidutils.h"
@@ -8,7 +7,6 @@
 #include "runtime/vmdefines.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
-#include "util/arrayview.h"
 
 namespace simlang
 {
@@ -49,7 +47,6 @@ bool CodeGenVisitor::emitNewMap(MapType* mapType)
 
 bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
 {
-    // Find out what type we want to reserve memory for on the heap.
     TypeID typeID;
     if (getRuntimeTypeID(classType, typeID) == false)
     {
@@ -59,13 +56,11 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
     // Create the class instance on the heap.
     emit<OpCode::cNewObject>(typeID);
 
-    // Duplicate the address since it'll serve as arg for the init call.
+    // Duplicate the address since we need it as first arg for the init call, and then for the expression of the "new".
     emit<OpCode::cDup>();
 
-    // Emit the args.
     Symbol* initializerSymbol = node->mInitMethodSymbol;
-    auto* funcType = static_cast<FunctionType*>(node->mInitMethodSymbol->mType);
-    if (emitCallArguments(node->mInitializerArguments, funcType) == false)
+    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(initializerSymbol->mType)) == false)
     {
         return false;
     }
@@ -78,34 +73,19 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
 
 bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structType)
 {
-    // Initialize all the fields.
-    const AggregateLayout* layout = structType->mLayout;
-    for (const FieldLayout& field : layout->mFields)
+    // Push zeroes and the stack address of the first word.
+    emit<OpCode::cNewStruct>(static_cast<OpWordCount>(structType->mLayout->mSize));
+
+    // Emit all the args.
+    Symbol* initializer = node->mInitMethodSymbol;
+    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(initializer->mType)) == false)
     {
-        ExpressionNode* value = nullptr;
-        for (FieldInitializer* init : node->mFieldInitializers)
-        {
-            if (init->mResolvedField == field.mSymbol)
-            {
-                value = init->mValue;
-                break;
-            }
-        }
-
-        // If the value was not found, use the default initializer.
-        if (value == nullptr)
-        {
-            // This should never be null since we checked it before.
-            auto* decl = static_cast<VariableDeclarationStatementNode*>(field.mSymbol->mDeclNode);
-            value = decl->mInit;
-        }
-
-        // Directly push the value onto the stack.
-        if (visit(value) == false)
-        {
-            return false;
-        }
+        return false;
     }
+
+    // Make the call to the constructor.
+    // The address will be consumed and the initialized words we pushed earlier will remain on the stack.
+    emit<OpCode::cCall>(static_cast<FunctionIdx>(initializer->mIndex));
 
     return true;
 }

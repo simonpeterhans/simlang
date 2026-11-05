@@ -52,14 +52,7 @@ public:
         return rebuild<FormatStringNode>(n, n->mLiterals, n->mArgs);
     }
 
-    ExpressionNode* visitNewObject(NewObjectNode* n)
-    {
-        return rebuild<NewObjectNode>(n,
-                                      n->mTypeSpecifier,
-                                      n->mFieldInitializers,
-                                      n->mInitializerArguments,
-                                      n->mConstructionKind);
-    }
+    ExpressionNode* visitNewObject(NewObjectNode* n) { return rebuild<NewObjectNode>(n, n->mTypeSpecifier, n->mArgs); }
 
     ExpressionNode* visitLambda(LambdaNode* n)
     {
@@ -299,19 +292,6 @@ protected:
     FunctionTypeParameterSpecifier cloneField(const FunctionTypeParameterSpecifier& param)
     {
         return FunctionTypeParameterSpecifier{param.mSourceRange, cloneField(param.mTypeSpecifier), param.mIsInOut};
-    }
-
-    FieldInitializer* cloneField(FieldInitializer* field)
-    {
-        if (field == nullptr)
-        {
-            return nullptr;
-        }
-
-        return mAllocator.create<FieldInitializer>(field->mSourceRange,
-                                                   field->mIdentifierRange,
-                                                   field->mIdentifier,
-                                                   cloneField(field->mValue));
     }
 
     ArenaAllocator& mAllocator;

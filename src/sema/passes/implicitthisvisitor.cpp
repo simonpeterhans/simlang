@@ -64,13 +64,9 @@ bool ImplicitThisVisitor::visitTernaryExpr(TernaryExprNode* node)
 
 bool ImplicitThisVisitor::visitNewObject(NewObjectNode* node)
 {
-    for (CallArgument& arg : node->mInitializerArguments)
+    for (CallArgument& arg : node->mArgs)
     {
         checkExpression(arg.mValue);
-    }
-    for (FieldInitializer* init : node->mFieldInitializers)
-    {
-        checkExpression(init->mValue);
     }
 
     return true;

@@ -29,7 +29,6 @@ struct TranslationUnitNode;
 struct TypeSpecifierNode;
 enum class AssignmentOp : u8;
 enum class BinaryOp : u8;
-enum class ConstructionKind : u8;
 enum class UnaryOp : u8;
 
 class Parser
@@ -133,14 +132,9 @@ private:
     ExpressionNode* parseString();
     ExpressionNode* parseFormattedString();
     ExpressionNode* parseParen();
-    ExpressionNode* parseMake();
     ExpressionNode* parseNew();
     ExpressionNode* parseLambda();
     bool parseArgumentList(std::vector<CallArgument>& args);
-    ExpressionNode* parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec);
-    ExpressionNode* parseObjectConstruction(Token constructionToken,
-                                            TypeSpecifierNode* typeSpec,
-                                            ConstructionKind constructionKind);
     ExpressionNode* parseFunctionCall(ExpressionNode* lhs);
     ExpressionNode* parseIndexCall(ExpressionNode* lhs);
     ExpressionNode* parseMemberAccess(ExpressionNode* lhs);
@@ -177,6 +171,7 @@ private:
     bool parseTemplateParameterList(std::vector<Identifier*>& params);
 
     ParamNode* parseFunctionParameter();
+    StatementNode* parseFieldDeclaration();
     StatementNode* parseFunctionDeclaration();
     StatementNode* parseInitializerDeclaration();
     StatementNode* parseTypeDeclaration();
@@ -195,7 +190,6 @@ private:
     Tokenizer& mTokenizer;
     Token mCurrentToken = cErrorToken;
     SourceLocation mPreviousTokenEnd = cInvalidSourceLoc;
-    bool mInTypeDeclaration = false;
     bool mInClass = false;
     bool mInInterface = false;
 };
