@@ -139,7 +139,7 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
     }
 
     // If this is a constexpr, we can try to emit the value directly.
-    if (symbol->mFlags.test(SymbolFlags::cConstExpr))
+    if (symbol->mConstEvalState == ConstEvalState::cReady)
     {
         if (node->mResolvedType->mKind == TypeKind::cPrimitive)
         {

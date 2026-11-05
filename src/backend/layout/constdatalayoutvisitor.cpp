@@ -177,15 +177,10 @@ bool ConstDataLayoutVisitor::writeConstGlobalInitializer(VariableDeclarationStat
     SIMLANG_ASSERTM(node->mInit->mFlags.test(cExprIsConstExpr),
                     "Global initializer is not constexpr after semantic analysis.");
 
-    // We have to evaluate again here for structs.
-    // This is less efficient than what it could be, but that's okay for now.
+    // Constant analysis has already validated this initializer.
     ConstValue value;
     ConstEvalVisitor evaluator{mCtx.mAllocator};
-    if (evaluator.evaluate(node->mInit, value) == false)
-    {
-        mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
-        return false;
-    }
+    evaluator.evaluate(node->mInit, value);
 
     Symbol* symbol = node->mSymbol;
     return writeConstGlobalValue(symbol->mType, static_cast<u32>(symbol->mIndex), value);
@@ -195,7 +190,7 @@ bool ConstDataLayoutVisitor::visitIdentifier(IdentifierNode* node)
 {
     // If this is not constexpr, we can't do anything with it.
     Symbol* symbol = node->mSymbol;
-    if (symbol->mFlags.test(SymbolFlags::cConstExpr) == false)
+    if (symbol->mConstEvalState != ConstEvalState::cReady)
     {
         return true;
     }

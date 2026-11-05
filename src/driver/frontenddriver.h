@@ -32,6 +32,7 @@ private:
     bool doThisRewrite(ModuleEntry* module);
     bool doCaptureAnalysis(ModuleEntry* module);
     bool doTypeCheck(ModuleEntry* module);
+    bool doConstAnalysis(ModuleEntry* module);
     bool doConstFolding(ModuleEntry* module);
 
     void emitStats();

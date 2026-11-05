@@ -159,9 +159,9 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
         return false;
     }
 
-    // Only symbols explicitly marked constexpr participate in constexpr evaluation.
-    // (TypeCheckVisitor already sets SymbolFlags::cConstExpr when the initializer is constexpr.)
-    if (s->mFlags.test(SymbolFlags::cConstExpr) == false)
+    // Params need to go through the call bindings, fields through their receiver.
+    // That means we only accept globals and locals here.
+    if (s->mSymbolType != SymbolType::cGlobalVariable && s->mSymbolType != SymbolType::cStackVariable)
     {
         return false;
     }
@@ -193,7 +193,10 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
     s->mConstEvalState = ConstEvalState::cProcessing;
 
     auto* decl = static_cast<VariableDeclarationStatementNode*>(s->mDeclNode);
-    if (visit(decl->mInit) == false)
+    // It's possible for mInit to be null if we have a multi-variable declaration.
+    // We do not currently allow this to be const evaluable, and so we need to make sure that is correct.
+    // (visit(nullptr) returns true, so visit(decl->mInit) is not enough.)
+    if (decl->mInit == nullptr || visit(decl->mInit) == false)
     {
         s->mConstEvalState = ConstEvalState::cFailed;
         return false;

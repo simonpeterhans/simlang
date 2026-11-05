@@ -185,10 +185,9 @@ bool Compiler::registerConst(std::string_view moduleName, std::string_view name,
     Symbol* s = mCtx->mSymbols.createSymbol(SymbolType::cGlobalVariable);
     s->mIdentifier = id;
     s->mFlags.set(SymbolFlags::cMutable, false);
-    s->mFlags.set(SymbolFlags::cConstExpr, true);
-    s->mConstEvalState = ConstEvalState::cReady;
     s->mType = t;
     s->mConstValue = constValue;
+    s->mConstEvalState = ConstEvalState::cReady;
 
     scope->addSymbol(s);
 

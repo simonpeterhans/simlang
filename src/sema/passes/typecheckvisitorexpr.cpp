@@ -8,10 +8,8 @@
 #include "diag/diagnosticmanager.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
 #include "sema/passes/typecheckvisitor.h"
 #include "source/sourcerange.h"
-#include "symbol/constvalue.h"
 #include "symbol/identifier.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
@@ -22,7 +20,6 @@
 #include "type/typetable.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
-#include "util/numeric.h"
 #include "util/scoping.h"
 #include "util/types.h"
 
@@ -52,11 +49,6 @@ bool TypeCheckVisitor::visitIdentifier(IdentifierNode* node)
     {
         node->mFlags.set(cExprIsMutable, true);
     }
-
-    // If we have a function value, a syscall value, or our symbol is a const expr already, mark us as such.
-    bool isConstExpr = s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall ||
-                       s->mFlags.test(SymbolFlags::cConstExpr);
-    node->mFlags.set(cExprIsConstExpr, isConstExpr);
 
     switch (s->mSymbolType)
     {
@@ -120,38 +112,7 @@ bool TypeCheckVisitor::visitCast(CastNode* node)
         return true;
     }
 
-    // If we have a cast from float to int, make sure the float isn't too large (or small).
-    PrimitiveTypeKind fromKind = getPrimitiveKind(node->mTarget->mResolvedType);
-    PrimitiveTypeKind toKind = getPrimitiveKind(targetType);
-    if (fromKind == PrimitiveTypeKind::cFloat && toKind == PrimitiveTypeKind::cInt &&
-        node->mTarget->mFlags.test(cExprIsConstExpr))
-    {
-        // Do const eval stuff.
-        ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        if (evaluator.evaluate(node->mTarget, value) && value.mKind == ConstValueKind::cPrimitive &&
-            value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
-        {
-            // Do the check and report on failure.
-            i32 intValue = 0;
-            if (checkedFloatToInt(value.as.mFloat, intValue) == false)
-            {
-                mCtx.report<cInvalidFloatToIntCast>(node->mSourceRange);
-                markError(node);
-                return true;
-            }
-        }
-    }
-
     node->mResolvedType = targetType;
-
-    // If the target is a constexpr, evaluate it.
-    if (node->mTarget->mFlags.test(cExprIsConstExpr))
-    {
-        ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value));
-    }
 
     return true;
 }
@@ -169,7 +130,6 @@ bool TypeCheckVisitor::visitThis(ThisNode* node)
 bool TypeCheckVisitor::visitIntLiteral(IntLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -178,7 +138,6 @@ bool TypeCheckVisitor::visitIntLiteral(IntLiteralNode* node)
 bool TypeCheckVisitor::visitFloatLiteral(FloatLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cFloat);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -187,7 +146,6 @@ bool TypeCheckVisitor::visitFloatLiteral(FloatLiteralNode* node)
 bool TypeCheckVisitor::visitBoolLiteral(BoolLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -196,7 +154,6 @@ bool TypeCheckVisitor::visitBoolLiteral(BoolLiteralNode* node)
 bool TypeCheckVisitor::visitStringLiteral(StringLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cString);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -205,7 +162,6 @@ bool TypeCheckVisitor::visitStringLiteral(StringLiteralNode* node)
 bool TypeCheckVisitor::visitNullLiteral(NullLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getNullType();
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -848,14 +804,6 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         if (receiverCanMutate && memberSymbol->mFlags.test(SymbolFlags::cMutable))
         {
             node->mFlags.set(cExprIsMutable, true);
-        }
-
-        // For structs, check constexpr-ness.
-        if (receiverType->mKind == TypeKind::cStruct && node->mReceiver->mFlags.test(cExprIsConstExpr))
-        {
-            ConstValue cv;
-            ConstEvalVisitor cev{mCtx.mAllocator};
-            node->mFlags.set(cExprIsConstExpr, cev.evaluate(node, cv));
         }
     }
 
