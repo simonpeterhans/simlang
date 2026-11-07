@@ -11,7 +11,51 @@
 namespace simlang
 {
 
-static bool isConstEvaluableExpression(ExpressionNode* node)
+ConstructorAnalyzer::ConstructorAnalyzer(ArenaAllocator& allocator)
+    : mAllocator(allocator)
+{
+}
+
+bool ConstructorAnalyzer::isConstEvaluableType(Type* type)
+{
+    // Primitives are always const-evaluable.
+    if (type->mKind == TypeKind::cPrimitive)
+    {
+        return true;
+    }
+
+    // Non-struct types (that are not primitives) are never const-evaluable.
+    if (type->mKind != TypeKind::cStruct)
+    {
+        return false;
+    }
+
+    // We're currently evaluating this struct, so mark it as false.
+    auto [it, inserted] = mTypes.emplace(type, false);
+    // If it was already in the map and was resolved at this point, we're good.
+    // If it was already in the map and wasn't resolved, we have a recursive struct, which is not allowed.
+    if (inserted == false)
+    {
+        return it->second;
+    }
+
+    // Go over all the members and check them.
+    auto* aggregate = static_cast<AggregateType*>(type);
+    for (Symbol* member : aggregate->mSymbol->mMembers)
+    {
+        if (member->mSymbolType == SymbolType::cMemberVariable && isConstEvaluableType(member->mType) == false)
+        {
+            return false;
+        }
+    }
+
+    // If we didn't bail earlier, mark the type as eligible.
+    mTypes[type] = true;
+
+    return true;
+}
+
+bool ConstructorAnalyzer::isConstEvaluableExpression(ExpressionNode* node)
 {
     // Check whether the expression we're getting is const-evaluable.
     switch (node->mNodeType)
@@ -26,7 +70,7 @@ static bool isConstEvaluableExpression(ExpressionNode* node)
         }
         case NodeType::cIdentifier:
         {
-            // Parameters (always const), or global/locals that are immutable are eligible.
+            // Parameters (always const), or globals/locals that are immutable are eligible.
             Symbol* symbol = static_cast<IdentifierNode*>(node)->mSymbol;
             return symbol->mSymbolType == SymbolType::cParameter ||
                    ((symbol->mSymbolType == SymbolType::cGlobalVariable ||
@@ -35,8 +79,33 @@ static bool isConstEvaluableExpression(ExpressionNode* node)
         }
         case NodeType::cModuleAccess:
         {
-            // For module access, check the rhs.
+            // For module access, check the rhs for eligibility.
             return isConstEvaluableExpression(static_cast<ModuleAccessNode*>(node)->mRight);
+        }
+        case NodeType::cMemberAccess:
+        {
+            // Struct members may be eligible.
+            auto* member = static_cast<MemberAccessNode*>(node);
+            return member->mReceiver->mResolvedType->mKind == TypeKind::cStruct &&
+                   isConstEvaluableExpression(member->mReceiver);
+        }
+        case NodeType::cNewObject:
+        {
+            auto* construction = static_cast<NewObjectNode*>(node);
+            if (construction->mResolvedType->mKind != TypeKind::cStruct)
+            {
+                return false;
+            }
+            for (const CallArgument& argument : construction->mArgs)
+            {
+                if (isConstEvaluableExpression(argument.mValue) == false)
+                {
+                    return false;
+                }
+            }
+
+            auto* type = static_cast<AggregateType*>(construction->mResolvedType);
+            return analyze(type, construction->mConstructorSymbol)->mIsConstEvaluable;
         }
         case NodeType::cImplicitCast:
         case NodeType::cCast:
@@ -65,8 +134,7 @@ static bool isConstEvaluableExpression(ExpressionNode* node)
                              binary->mOp == BinaryOp::cMul ||
                              ((binary->mOp == BinaryOp::cEQ || binary->mOp == BinaryOp::cNE) &&
                               getPrimitiveKind(binary->mLeft->mResolvedType) == PrimitiveTypeKind::cBool);
-            return supported && isConstEvaluableExpression(binary->mLeft) &&
-                   isConstEvaluableExpression(binary->mRight);
+            return supported && isConstEvaluableExpression(binary->mLeft) && isConstEvaluableExpression(binary->mRight);
         }
         default:
         {
@@ -75,7 +143,7 @@ static bool isConstEvaluableExpression(ExpressionNode* node)
     }
 }
 
-const ConstructorAnalysis* getConstructorAnalysis(ArenaAllocator& allocator, AggregateType* type, Symbol* constructor)
+const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Symbol* constructor)
 {
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructor->mDeclNode);
 
@@ -86,14 +154,15 @@ const ConstructorAnalysis* getConstructorAnalysis(ArenaAllocator& allocator, Agg
     }
 
     // Otherwise, do the analysis.
-    auto* result = allocator.create<ConstructorAnalysis>();
+    auto* result = mAllocator.create<ConstructorAnalysis>();
     declaration->mConstructorAnalysis = result;
 
-    // If any parameter is not a primitive or is an inout param, we're not const-evaluable.
+    // Parameters and fields may contain primitives (including strings) and nested value structs.
+    // Type composition is independent of the constructors used to create those values.
     auto* functionType = static_cast<FunctionType*>(constructor->mType);
     for (const FunctionParam& param : functionType->mParamTypes)
     {
-        if (param.mIsInOut || param.mType->mKind != TypeKind::cPrimitive)
+        if (param.mIsInOut || isConstEvaluableType(param.mType) == false)
         {
             return result;
         }
@@ -105,8 +174,7 @@ const ConstructorAnalysis* getConstructorAnalysis(ArenaAllocator& allocator, Agg
     {
         if (member->mSymbolType == SymbolType::cMemberVariable)
         {
-            // If any of the fields are not primitives, we're not const-evaluable either.
-            if (member->mType->mKind != TypeKind::cPrimitive)
+            if (isConstEvaluableType(member->mType) == false)
             {
                 return result;
             }
@@ -142,7 +210,7 @@ const ConstructorAnalysis* getConstructorAnalysis(ArenaAllocator& allocator, Agg
     }
 
     // If all of this succeeded, we treat it as const-evaluable.
-    result->mFields = makeArrayView(allocator, fields);
+    result->mFields = makeArrayView(mAllocator, fields);
     result->mIsConstEvaluable = true;
 
     return result;

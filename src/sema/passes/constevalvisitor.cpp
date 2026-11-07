@@ -1,5 +1,6 @@
 #include "sema/passes/constevalvisitor.h"
 
+#include <algorithm>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -45,77 +46,43 @@ bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue)
     return true;
 }
 
-static bool applyConstCast(ConstValue& value, Type* targetType)
+static bool applyConstCast(ConstValue& value, Type* sourceType, Type* targetType)
 {
-    // Allow cast to null for classes, lists, maps, and interfaces.
-    if (value.mKind == ConstValueKind::cNull)
-    {
-        return targetType->mKind == TypeKind::cClass || targetType->mKind == TypeKind::cList ||
-               targetType->mKind == TypeKind::cMap || targetType->mKind == TypeKind::cInterface;
-    }
-
-    // The only valid function cast is the same exact signature.
-    // That means we can just compare types.
-    if (value.mKind == ConstValueKind::cFunction)
-    {
-        return value.as.mFunction != nullptr && value.as.mFunction->mType == targetType;
-    }
-
-    // Otherwise, the type has to be a primitive.
-    if (targetType->mKind != TypeKind::cPrimitive)
-    {
-        return false;
-    }
-
-    // The value also has to be a primitive, or the cast will fail.
-    if (value.mKind != ConstValueKind::cPrimitive)
-    {
-        return false;
-    }
-
-    auto* primitiveTarget = static_cast<PrimitiveType*>(targetType);
-    PrimitiveTypeKind targetKind = primitiveTarget->mPrimitiveKind;
-
-    // If we already have the right type, we're done.
-    if (targetKind == value.mPrimitiveKind)
+    // Identity casts preserve the value, including nested structs. Valid reference casts preserve null.
+    if (sourceType == targetType || value.mKind == ConstValueKind::cNull)
     {
         return true;
     }
 
-    // Otherwise, do int/float/bool casts.
-    if (targetKind == PrimitiveTypeKind::cInt && value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
+    // Type checking leaves only conversions between int, float, and bool.
+    auto* primitiveTarget = static_cast<PrimitiveType*>(targetType);
+    PrimitiveTypeKind targetKind = primitiveTarget->mPrimitiveKind;
+    if (targetKind == PrimitiveTypeKind::cInt)
     {
-        i32 intValue = 0;
-        if (checkedFloatToInt(value.as.mFloat, intValue) == false)
+        if (value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
         {
-            return false;
+            i32 intValue = 0;
+            if (checkedFloatToInt(value.as.mFloat, intValue) == false)
+            {
+                return false;
+            }
+            value = ConstValue::makeInteger(intValue);
         }
-
-        value = ConstValue::makeInteger(intValue);
+        else
+        {
+            value = ConstValue::makeInteger(value.as.mBool ? 1 : 0);
+        }
     }
-    else if (targetKind == PrimitiveTypeKind::cInt && value.mPrimitiveKind == PrimitiveTypeKind::cBool)
+    else if (targetKind == PrimitiveTypeKind::cFloat)
     {
-        value = ConstValue::makeInteger(value.as.mBool ? 1 : 0);
-    }
-    else if (targetKind == PrimitiveTypeKind::cFloat && value.mPrimitiveKind == PrimitiveTypeKind::cInt)
-    {
-        value = ConstValue::makeFloat(static_cast<f32>(value.as.mInteger));
-    }
-    else if (targetKind == PrimitiveTypeKind::cFloat && value.mPrimitiveKind == PrimitiveTypeKind::cBool)
-    {
-        value = ConstValue::makeFloat(value.as.mBool ? 1.0f : 0.0f);
-    }
-    else if (targetKind == PrimitiveTypeKind::cBool && value.mPrimitiveKind == PrimitiveTypeKind::cInt)
-    {
-        value = ConstValue::makeBool(value.as.mInteger != 0);
-    }
-    else if (targetKind == PrimitiveTypeKind::cBool && value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
-    {
-        value = ConstValue::makeBool(value.as.mFloat != 0.0f);
+        value =
+            ConstValue::makeFloat(value.mPrimitiveKind == PrimitiveTypeKind::cInt ? static_cast<f32>(value.as.mInteger)
+                                                                                  : (value.as.mBool ? 1.0f : 0.0f));
     }
     else
     {
-        return false;
+        value = ConstValue::makeBool(value.mPrimitiveKind == PrimitiveTypeKind::cInt ? value.as.mInteger != 0
+                                                                                     : value.as.mFloat != 0.0f);
     }
 
     return true;
@@ -130,7 +97,7 @@ bool ConstEvalVisitor::visitImplicitCast(ImplicitCastNode* node)
     }
 
     // Apply the cast.
-    return applyConstCast(mValue, node->mResolvedType);
+    return applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType);
 }
 
 bool ConstEvalVisitor::visitCast(CastNode* node)
@@ -142,7 +109,7 @@ bool ConstEvalVisitor::visitCast(CastNode* node)
     }
 
     // Apply the cast.
-    return applyConstCast(mValue, node->mResolvedType);
+    return applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType);
 }
 
 bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
@@ -294,7 +261,8 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
 
     // Get the constructor analysis.
     auto* type = static_cast<AggregateType*>(node->mResolvedType);
-    const ConstructorAnalysis* analysis = getConstructorAnalysis(mAllocator, type, node->mConstructorSymbol);
+    ConstructorAnalyzer analyzer{mAllocator};
+    const ConstructorAnalysis* analysis = analyzer.analyze(type, node->mConstructorSymbol);
 
     // If it isn't const-evaluable, bail.
     if (analysis->mIsConstEvaluable == false)
@@ -365,14 +333,14 @@ bool ConstEvalVisitor::visitIndexCall(IndexCallNode*)
 
 bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
 {
-    if (node->mSymbol->mSymbolType != SymbolType::cMemberVariable)
+    // Const eval member access can only be done on structs.
+    if (node->mReceiver->mResolvedType->mKind != TypeKind::cStruct)
     {
         return false;
     }
 
-    // Const eval member access can only be done on structs.
     ConstValue receiverValue;
-    if (evaluate(node->mReceiver, receiverValue) == false || receiverValue.mKind != ConstValueKind::cStruct)
+    if (evaluate(node->mReceiver, receiverValue) == false)
     {
         return false;
     }

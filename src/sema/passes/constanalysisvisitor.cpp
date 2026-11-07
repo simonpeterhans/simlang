@@ -305,7 +305,9 @@ bool ConstAnalysisVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
         {
             // Analyze the constructor's constexpr subset before constant folding changes its body.
             auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
-            getConstructorAnalysis(mCtx.mAllocator, type, type->mConstructorSymbol);
+
+            ConstructorAnalyzer analyzer{mCtx.mAllocator};
+            analyzer.analyze(type, type->mConstructorSymbol);
         }
         ASTWalker::visitTypeDeclarationStatement(node);
     }
