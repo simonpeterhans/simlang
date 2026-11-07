@@ -25,7 +25,7 @@ public:
     bool visitStringLiteral(StringLiteralNode* node);
     bool visitNullLiteral(NullLiteralNode*);
     bool visitFormatString(FormatStringNode* node);
-    bool visitNewObject(NewObjectNode*);
+    bool visitNewObject(NewObjectNode* node);
     bool visitLambda(LambdaNode* node);
     bool visitFunctionCall(FunctionCallNode* node);
     bool visitIndexCall(IndexCallNode*);
@@ -36,7 +36,14 @@ public:
     bool visitTernaryExpr(TernaryExprNode* node);
 
 private:
+    struct CallFrame
+    {
+        FunctionDeclarationStatementNode* mConstructor;
+        ArrayView<const ConstValue> mArguments;
+    };
+
     ArenaAllocator& mAllocator;
+    const CallFrame* mFrame = nullptr;
     ConstValue mValue;
 };
 

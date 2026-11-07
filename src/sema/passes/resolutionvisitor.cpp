@@ -351,8 +351,8 @@ bool ResolutionVisitor::visitFunctionDeclarationStatement(FunctionDeclarationSta
     Symbol* thisOwner = (node->mSymbol->mSymbolType == SymbolType::cMemberFunction) ? node->mSymbol : nullptr;
     ScopedValueBinder thisOwnerScope{mCurrentThisOwner, thisOwner};
 
-    // For non-initializers, resolve the return type.
-    if (node->mIsInitMethod == false)
+    // For non-constructors, resolve the return type.
+    if (node->mIsConstructor == false)
     {
         if (visit(node->mReturnTypeSpec) == false)
         {

@@ -56,17 +56,17 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
     // Create the class instance on the heap.
     emit<OpCode::cNewObject>(typeID);
 
-    // Duplicate the address since we need it as first arg for the init call, and then for the expression of the "new".
+    // Duplicate the address since we need it as arg for the constructor call, and then for the expression of the "new".
     emit<OpCode::cDup>();
 
-    Symbol* initializerSymbol = node->mInitMethodSymbol;
-    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(initializerSymbol->mType)) == false)
+    Symbol* constructorSymbol = node->mConstructorSymbol;
+    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(constructorSymbol->mType)) == false)
     {
         return false;
     }
 
     // Emit the call.
-    emit<OpCode::cCallMethod>(static_cast<FunctionIdx>(initializerSymbol->mIndex));
+    emit<OpCode::cCallMethod>(static_cast<FunctionIdx>(constructorSymbol->mIndex));
 
     return true;
 }
@@ -77,15 +77,15 @@ bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structTyp
     emit<OpCode::cNewStruct>(static_cast<OpWordCount>(structType->mLayout->mSize));
 
     // Emit all the args.
-    Symbol* initializer = node->mInitMethodSymbol;
-    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(initializer->mType)) == false)
+    Symbol* constructor = node->mConstructorSymbol;
+    if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(constructor->mType)) == false)
     {
         return false;
     }
 
     // Make the call to the constructor.
     // The address will be consumed and the initialized words we pushed earlier will remain on the stack.
-    emit<OpCode::cCall>(static_cast<FunctionIdx>(initializer->mIndex));
+    emit<OpCode::cCall>(static_cast<FunctionIdx>(constructor->mIndex));
 
     return true;
 }

@@ -259,28 +259,28 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         return true;
     }
 
-    // For structs and classes, get the initializer symbol and resolve that.
+    // For structs and classes, get the constructor symbol and resolve that.
     auto* aggregateType = static_cast<AggregateType*>(type);
-    Symbol* initializer = aggregateType->mInitMethodSymbol;
-    if (resolveType(initializer) == false)
+    Symbol* constructor = aggregateType->mConstructorSymbol;
+    if (resolveType(constructor) == false)
     {
         return false;
     }
 
-    // Make sure the initializer is accessible.
-    if (checkMemberAccess(initializer, aggregateType->mSymbol) == false)
+    // Make sure the constructor is accessible.
+    if (checkMemberAccess(constructor, aggregateType->mSymbol) == false)
     {
-        mCtx.report<cPrivateMemberAccess>(node->mSourceRange, initializer->mIdentifier, typeToString(type));
+        mCtx.report<cPrivateMemberAccess>(node->mSourceRange, constructor->mIdentifier, typeToString(type));
         markError(node);
         return true;
     }
 
-    // Fill the node with the initializer and resolved type.
-    node->mInitMethodSymbol = initializer;
+    // Fill the node with the constructor and resolved type.
+    node->mConstructorSymbol = constructor;
     node->mResolvedType = type;
 
     // Make sure the constructor stuff matches.
-    auto* functionType = static_cast<FunctionType*>(initializer->mType);
+    auto* functionType = static_cast<FunctionType*>(constructor->mType);
     if (checkCallArguments(node->mSourceRange, node->mArgs, functionType) == false)
     {
         markError(node);
@@ -747,11 +747,11 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         return false;
     }
 
-    // Disallow access to initializers.
+    // Disallow access to constructors.
     if ((receiverType->mKind == TypeKind::cStruct || receiverType->mKind == TypeKind::cClass) &&
-        static_cast<AggregateType*>(receiverType)->mInitMethodSymbol == memberSymbol)
+        static_cast<AggregateType*>(receiverType)->mConstructorSymbol == memberSymbol)
     {
-        mCtx.report<cInitializerAccess>(node->mSourceRange);
+        mCtx.report<cConstructorAccess>(node->mSourceRange);
         markError(node);
         return true;
     }

@@ -7,6 +7,7 @@
 #include "diag/diagnosticmanager.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
+#include "sema/constructoranalysis.h"
 #include "sema/passes/constevalvisitor.h"
 #include "symbol/constvalue.h"
 #include "symbol/symbol.h"
@@ -136,6 +137,18 @@ bool ConstAnalysisVisitor::visitCast(CastNode* node)
     }
 
     node->mFlags.set(cExprIsConstExpr, isConstExpr);
+
+    return true;
+}
+
+bool ConstAnalysisVisitor::visitNewObject(NewObjectNode* node)
+{
+    ASTWalker::visitNewObject(node);
+
+    // Evaluate the expression to see if it is const-expr eligible.
+    ConstValue value;
+    ConstEvalVisitor evaluator{mCtx.mAllocator};
+    node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value));
 
     return true;
 }
@@ -288,6 +301,12 @@ bool ConstAnalysisVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
     // Never do this for template declarations, instances are visited separately.
     if (node->isTemplate() == false)
     {
+        if (node->isStruct())
+        {
+            // Analyze the constructor's constexpr subset before constant folding changes its body.
+            auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
+            getConstructorAnalysis(mCtx.mAllocator, type, type->mConstructorSymbol);
+        }
         ASTWalker::visitTypeDeclarationStatement(node);
     }
 

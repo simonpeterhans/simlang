@@ -195,7 +195,7 @@ bool TypeCheckVisitor::convertArgumentToParameterType(ExpressionNode*& expr, Typ
     return false;
 }
 
-Symbol* TypeCheckVisitor::getInitializerAssignedField(ExpressionNode* lhs) const
+Symbol* TypeCheckVisitor::getConstructorAssignedField(ExpressionNode* lhs) const
 {
     // This has to be a member access node.
     if (lhs->mNodeType != NodeType::cMemberAccess)
@@ -220,17 +220,17 @@ Symbol* TypeCheckVisitor::getInitializerAssignedField(ExpressionNode* lhs) const
     return symbol;
 }
 
-bool TypeCheckVisitor::isInitializerFieldAssignment(AssignmentStatementNode* node) const
+bool TypeCheckVisitor::isConstructorFieldAssignment(AssignmentStatementNode* node) const
 {
-    // Here, we want to find out if an assignment statement comes before the first non-assignment in an initializer.
-    // If we have no function or we are not in an initializer, bail.
-    if (mCurrentFunction == nullptr || mCurrentFunction->mIsInitMethod == false)
+    // Here, we want to find out if an assignment statement comes before the first non-assignment in a constructor.
+    // If we have no function or we are not in a constructor, bail.
+    if (mCurrentFunction == nullptr || mCurrentFunction->mIsConstructor == false)
     {
         return false;
     }
 
     // Get the symbol we're assigning to.
-    Symbol* assignedField = getInitializerAssignedField(node->mLHS);
+    Symbol* assignedField = getConstructorAssignedField(node->mLHS);
     if (assignedField == nullptr)
     {
         return false;
@@ -254,7 +254,7 @@ bool TypeCheckVisitor::isInitializerFieldAssignment(AssignmentStatementNode* nod
         // Otherwise, make sure it's a '=' assignment and it assigns to a member.
         auto* leadingAssignment = static_cast<AssignmentStatementNode*>(stmt);
         if (leadingAssignment->mOp != AssignmentOp::cAss ||
-            getInitializerAssignedField(leadingAssignment->mLHS) == nullptr)
+            getConstructorAssignedField(leadingAssignment->mLHS) == nullptr)
         {
             return false;
         }
@@ -797,11 +797,11 @@ bool TypeCheckVisitor::visitAssignmentStatement(AssignmentStatementNode* node)
         return true;
     }
 
-    // We allow const values to be assigned to in the initializer.
+    // We allow const fields to be assigned to in the constructor.
     // But (for now) only, if they appear before the first non-assignment statement.
-    // We allow immutability only if it is one an initializer assignment.
-    bool allowInitializerFieldAssignment = isInitializerFieldAssignment(node);
-    if (requireAssignableLValue(node->mLHS, allowInitializerFieldAssignment) == false)
+    // Allow assignments to immutable fields only in the constructor's leading field assignments.
+    bool allowConstructorFieldAssignment = isConstructorFieldAssignment(node);
+    if (requireAssignableLValue(node->mLHS, allowConstructorFieldAssignment) == false)
     {
         return true;
     }

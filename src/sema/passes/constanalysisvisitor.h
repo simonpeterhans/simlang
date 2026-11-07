@@ -18,6 +18,7 @@ public:
     void leaveNode(ASTNode* node);
 
     bool visitCast(CastNode* node);
+    bool visitNewObject(NewObjectNode* node);
     bool visitMemberAccess(MemberAccessNode* node);
     bool visitModuleAccess(ModuleAccessNode* node);
     bool visitBinaryOp(BinaryOpNode* node);

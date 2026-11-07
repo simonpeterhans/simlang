@@ -173,7 +173,7 @@ private:
     ParamNode* parseFunctionParameter();
     StatementNode* parseFieldDeclaration();
     StatementNode* parseFunctionDeclaration();
-    StatementNode* parseInitializerDeclaration();
+    StatementNode* parseConstructorDeclaration();
     StatementNode* parseTypeDeclaration();
     StatementNode* parseTemplateDeclaration();
     StatementNode* parseImportDeclaration();

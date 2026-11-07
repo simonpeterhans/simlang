@@ -2176,7 +2176,7 @@ bool VM::run()
         // Stack: [...] -> [addr, zeroN-1, ..., zero0, ...]
         OpWordCount size = readPC<OpWordCount>(pc);
 
-        // Reserve zeroed inline struct storage and its initializer receiver on the stack.
+        // Reserve zeroed inline struct storage and its constructor receiver on the stack.
         u32 resultIndex = static_cast<u32>(sp - stackBase);
         std::memset(sp, 0, static_cast<usize>(size) * sizeof(VMWord));
 

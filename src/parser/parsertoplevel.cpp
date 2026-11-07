@@ -249,7 +249,7 @@ StatementNode* Parser::parseFunctionDeclaration()
     return buildNode();
 }
 
-StatementNode* Parser::parseInitializerDeclaration()
+StatementNode* Parser::parseConstructorDeclaration()
 {
     Token initToken = consume();
     StatementNode* body = nullptr;
@@ -493,7 +493,7 @@ StatementNode* Parser::parseTypeMember()
         {
             if (getCurrentToken().mIdentifier == mCtx.mIdentifiers.getInitIdentifier())
             {
-                result = parseInitializerDeclaration();
+                result = parseConstructorDeclaration();
                 break;
             }
 
@@ -520,7 +520,7 @@ StatementNode* Parser::parseTypeMember()
         if (result->mNodeType == NodeType::cFunctionDeclarationStatement)
         {
             auto* fun = static_cast<FunctionDeclarationStatementNode*>(result);
-            isMethod = (fun->mIsInitMethod == false);
+            isMethod = (fun->mIsConstructor == false);
         }
 
         if (mInClass == false || isMethod == false)

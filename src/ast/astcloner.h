@@ -118,7 +118,7 @@ public:
                                                          n->mParams,
                                                          n->mReturnTypeSpec,
                                                          n->mBody,
-                                                         n->mIsInitMethod);
+                                                         n->mIsConstructor);
     }
 
     StatementNode* visitTypeDeclarationStatement(TypeDeclarationStatementNode* n)

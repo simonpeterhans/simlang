@@ -286,28 +286,28 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
         }
     }
 
-    // Find the initializer for anything but interfaces.
-    FunctionDeclarationStatementNode* initializer = nullptr;
+    // Find the constructor for anything but interfaces.
+    FunctionDeclarationStatementNode* constructor = nullptr;
     if (node->isInterface() == false)
     {
-        // Go through all members and find the initializer.
+        // Go through all members and find the constructor.
         for (StatementNode* member : node->mMembers)
         {
             if (member->mNodeType == NodeType::cFunctionDeclarationStatement)
             {
                 auto* function = static_cast<FunctionDeclarationStatementNode*>(member);
-                if (function->mIsInitMethod)
+                if (function->mIsConstructor)
                 {
-                    initializer = function;
+                    constructor = function;
                     break;
                 }
             }
         }
 
         // If we have none, complain.
-        if (initializer == nullptr)
+        if (constructor == nullptr)
         {
-            mCtx.report<cMissingInitializer>(node->mIdentifierRange, node->mIdentifier);
+            mCtx.report<cMissingConstructor>(node->mIdentifierRange, node->mIdentifier);
             return true;
         }
     }
@@ -387,7 +387,7 @@ bool DeclCollectorVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
     if (node->isInterface() == false)
     {
         auto* aggregateType = static_cast<AggregateType*>(symbol->mType);
-        aggregateType->mInitMethodSymbol = initializer->mSymbol;
+        aggregateType->mConstructorSymbol = constructor->mSymbol;
     }
 
     return true;

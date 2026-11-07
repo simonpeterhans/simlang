@@ -2,11 +2,13 @@
 
 #include <limits>
 #include <string_view>
+#include <vector>
 
 #include "ast/binaryop.h"
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/stmtnodes.h"
 #include "ast/unaryop.h"
+#include "sema/constructoranalysis.h"
 #include "symbol/internedstring.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
@@ -16,6 +18,7 @@
 #include "util/arrayview.h"
 #include "util/flags.h"
 #include "util/numeric.h"
+#include "util/scoping.h"
 #include "util/types.h"
 
 namespace simlang
@@ -146,6 +149,27 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 {
     Symbol* s = node->mSymbol;
 
+    // Check if this is a parameter, in which case we might be evaluating a call.
+    if (s->mSymbolType == SymbolType::cParameter)
+    {
+        // If we are, try to look up the value since it might be const eval (e.g. new Vector(0.0, 0.0, 0.0);).
+        if (mFrame != nullptr)
+        {
+            // This is currently only supported for constructors.
+            for (usize i = 0; i < mFrame->mConstructor->mParams.size(); ++i)
+            {
+                auto* param = static_cast<ParamDeclarationNode*>(mFrame->mConstructor->mParams[i]);
+                if (param->mSymbol == s)
+                {
+                    mValue = mFrame->mArguments[i];
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     // If we have a function or a syscall, we can directly handle that (sine they're immutable anyway).
     if (s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall)
     {
@@ -260,11 +284,72 @@ bool ConstEvalVisitor::visitFormatString(FormatStringNode*)
     return false;
 }
 
-bool ConstEvalVisitor::visitNewObject(NewObjectNode*)
+bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
 {
-    // Constructor calls are evaluated at runtime.
-    // This is subject to change later on (since we need simple constructors to be const evaluable).
-    return false;
+    // Only struct constructors are currently const eval.
+    if (node->mResolvedType->mKind != TypeKind::cStruct)
+    {
+        return false;
+    }
+
+    // Get the constructor analysis.
+    auto* type = static_cast<AggregateType*>(node->mResolvedType);
+    const ConstructorAnalysis* analysis = getConstructorAnalysis(mAllocator, type, node->mConstructorSymbol);
+
+    // If it isn't const-evaluable, bail.
+    if (analysis->mIsConstEvaluable == false)
+    {
+        return false;
+    }
+
+    // Evaluate every argument in the caller's frame, including unused ones.
+    std::vector<ConstValue> arguments(node->mArgs.size());
+    bool argumentsOk = true;
+    for (usize i = 0; i < node->mArgs.size(); ++i)
+    {
+        if (evaluate(node->mArgs[i].mValue, arguments[i]) == false)
+        {
+            argumentsOk = false;
+        }
+    }
+
+    // If any argument isn't const-evaluable, bail.
+    if (argumentsOk == false)
+    {
+        return false;
+    }
+
+    // If they all are, we prepare for the constructor call.
+    auto* declaration = static_cast<FunctionDeclarationStatementNode*>(node->mConstructorSymbol->mDeclNode);
+
+    // Store the constructor declaration and its arguments and scope it.
+    CallFrame frame{
+        declaration,
+        {arguments.data(), arguments.size()}
+    };
+    ScopedValueBinder<const CallFrame*> frameScope{mFrame, &frame};
+
+    // Now, evaluate all the fields of the struct.
+    // For this, we take the expressions for the fields from the analayis and evaluate them.
+    auto* fields = mAllocator.createArray<ConstFieldValue>(analysis->mFields.size());
+    for (usize i = 0; i < analysis->mFields.size(); ++i)
+    {
+        const FieldInitialization& field = analysis->mFields[i];
+        auto* value = mAllocator.create<ConstValue>();
+        if (evaluate(field.mExpression, *value) == false)
+        {
+            return false;
+        }
+        fields[i] = {field.mField, value};
+    }
+
+    // Then, create the const value for the struct and store it.
+    auto* result = mAllocator.create<ConstStructValue>();
+    result->mType = type;
+    result->mFields = {fields, analysis->mFields.size()};
+    mValue = ConstValue::makeStruct(result);
+
+    return true;
 }
 
 bool ConstEvalVisitor::visitFunctionCall(FunctionCallNode*)
@@ -287,9 +372,7 @@ bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
 
     // Const eval member access can only be done on structs.
     ConstValue receiverValue;
-    ConstEvalVisitor receiverEvaluator{mAllocator};
-    if (receiverEvaluator.evaluate(node->mReceiver, receiverValue) == false ||
-        receiverValue.mKind != ConstValueKind::cStruct)
+    if (evaluate(node->mReceiver, receiverValue) == false || receiverValue.mKind != ConstValueKind::cStruct)
     {
         return false;
     }
@@ -364,10 +447,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
     ConstValue l;
     ConstValue r;
 
-    ConstEvalVisitor lv{mAllocator};
-    ConstEvalVisitor rv{mAllocator};
-
-    if (lv.evaluate(node->mLeft, l) == false || rv.evaluate(node->mRight, r) == false)
+    if (evaluate(node->mLeft, l) == false || evaluate(node->mRight, r) == false)
     {
         return false;
     }
@@ -637,8 +717,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 {
     // Try to evaluate the condition.
     ConstValue conditionValue;
-    ConstEvalVisitor conditionVisitor{mAllocator};
-    if (conditionVisitor.evaluate(node->mCondition, conditionValue) == false ||
+    if (evaluate(node->mCondition, conditionValue) == false ||
         conditionValue.mPrimitiveKind != PrimitiveTypeKind::cBool)
     {
         return false;
@@ -649,8 +728,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 
     // Evaluate that one.
     ConstValue selectedValue;
-    ConstEvalVisitor branchVisitor{mAllocator};
-    if (branchVisitor.evaluate(selectedExpr, selectedValue) == false)
+    if (evaluate(selectedExpr, selectedValue) == false)
     {
         return false;
     }

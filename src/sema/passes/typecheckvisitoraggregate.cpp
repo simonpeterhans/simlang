@@ -181,7 +181,7 @@ bool TypeCheckVisitor::checkInterface(TypeDeclarationStatementNode* node)
             // Find the matching member function.
             for (Symbol* member : node->mSymbol->mMembers)
             {
-                if (member == aggregateType->mInitMethodSymbol)
+                if (member == aggregateType->mConstructorSymbol)
                 {
                     continue;
                 }
@@ -322,12 +322,12 @@ bool TypeCheckVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNod
 
     // Next, we go through all statements and make sure that we initialize all fields before we do something else.
     auto* aggregateType = static_cast<AggregateType*>(node->mSymbol->mType);
-    auto* init = static_cast<FunctionDeclarationStatementNode*>(aggregateType->mInitMethodSymbol->mDeclNode);
+    auto* constructor = static_cast<FunctionDeclarationStatementNode*>(aggregateType->mConstructorSymbol->mDeclNode);
 
     // Nothing is initialized to begin with.
     std::vector initialized(fields.size(), false);
 
-    auto* body = static_cast<BlockStatementNode*>(init->mBody);
+    auto* body = static_cast<BlockStatementNode*>(constructor->mBody);
     for (StatementNode* statement : body->mStatements)
     {
         // If this is not an assignment, complain (for now).
@@ -344,7 +344,7 @@ bool TypeCheckVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNod
         }
 
         // Check which field we're assigning to.
-        Symbol* field = getInitializerAssignedField(assignment->mLHS);
+        Symbol* field = getConstructorAssignedField(assignment->mLHS);
         if (field == nullptr)
         {
             break;
@@ -367,9 +367,9 @@ bool TypeCheckVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNod
         if (initialized[i] == false)
         {
             Symbol* field = fields[i];
-            mCtx.report<cMissingFieldInitializer>(init->mIdentifierRange, field->mIdentifier)
+            mCtx.report<cMissingFieldInitializer>(constructor->mIdentifierRange, field->mIdentifier)
                 .note<cFieldDeclaredHere>(getSymbolSourceRange(field), field->mIdentifier)
-                .hint<cFieldInitializationHint>(init->mIdentifierRange);
+                .hint<cFieldInitializationHint>(constructor->mIdentifierRange);
             typeOk = false;
         }
     }

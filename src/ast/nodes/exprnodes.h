@@ -171,8 +171,8 @@ struct NewObjectNode : ExpressionNode
     TypeSpecifierNode* mTypeSpecifier;
     ArrayView<CallArgument> mArgs;
 
-    // The selected initializer (unused for lists/maps).
-    Symbol* mInitMethodSymbol = nullptr;
+    // The selected constructor (unused for lists/maps).
+    Symbol* mConstructorSymbol = nullptr;
 };
 
 enum class LambdaCaptureKind : u8
