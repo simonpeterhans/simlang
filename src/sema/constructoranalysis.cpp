@@ -114,27 +114,20 @@ bool ConstructorAnalyzer::isConstEvaluableExpression(ExpressionNode* node)
             ExpressionNode* target = node->mNodeType == NodeType::cImplicitCast
                                          ? static_cast<ImplicitCastNode*>(node)->mTarget
                                          : static_cast<CastNode*>(node)->mTarget;
-            // Matching types and int to float are eligible if the expression is const evaluable.
-            return (node->mResolvedType == target->mResolvedType ||
-                    (getPrimitiveKind(node->mResolvedType) == PrimitiveTypeKind::cFloat &&
-                     getPrimitiveKind(target->mResolvedType) == PrimitiveTypeKind::cInt)) &&
-                   isConstEvaluableExpression(target);
+            // The evaluator applies the type-checked conversion to each call's value.
+            return isConstEvaluableExpression(target);
         }
         case NodeType::cUnaryOp:
         {
-            // Only const-evaluable '-' is currently eligible.
+            // Built-in unary operators use the evaluator's semantics.
             auto* unary = static_cast<UnaryOpNode*>(node);
-            return unary->mOp == UnaryOp::cNeg && isConstEvaluableExpression(unary->mExpr);
+            return isConstEvaluableExpression(unary->mExpr);
         }
         case NodeType::cBinaryOp:
         {
-            // Only '+', '-', '*', "==" and "!=" are currently eligible.
+            // Checked operations may succeed or fail for different arguments to the same constructor.
             auto* binary = static_cast<BinaryOpNode*>(node);
-            bool supported = binary->mOp == BinaryOp::cAdd || binary->mOp == BinaryOp::cSub ||
-                             binary->mOp == BinaryOp::cMul ||
-                             ((binary->mOp == BinaryOp::cEQ || binary->mOp == BinaryOp::cNE) &&
-                              getPrimitiveKind(binary->mLeft->mResolvedType) == PrimitiveTypeKind::cBool);
-            return supported && isConstEvaluableExpression(binary->mLeft) && isConstEvaluableExpression(binary->mRight);
+            return isConstEvaluableExpression(binary->mLeft) && isConstEvaluableExpression(binary->mRight);
         }
         default:
         {

@@ -1,6 +1,7 @@
 #include "runtime/vm/vm.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -3904,9 +3905,7 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        f32 q = lhs / rhs;
-        i32 n = static_cast<i32>(q);
-        result = lhs - static_cast<f32>(n) * rhs;
+        result = std::fmod(lhs, rhs);
         sp[-1] = bits::bitCast<VMWord>(result);
 
         VM_END_OP();

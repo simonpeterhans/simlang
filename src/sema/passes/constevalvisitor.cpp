@@ -1,6 +1,7 @@
 #include "sema/passes/constevalvisitor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -30,7 +31,30 @@ ConstEvalVisitor::ConstEvalVisitor(ArenaAllocator& allocator)
 {
 }
 
-bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue)
+bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue, ConstEvalFailure* failure)
+{
+    if (failure != nullptr)
+    {
+        *failure = {};
+    }
+
+    ScopedValueBinder failureScope{mFailure, failure};
+
+    return evaluateValue(node, outValue);
+}
+
+bool ConstEvalVisitor::fail(ConstEvalFailureKind kind, ExpressionNode* expression, i32 shiftCount)
+{
+    // Later constructor arguments must still evaluate without overwriting the first failure.
+    if (mFailure != nullptr && mFailure->mKind == ConstEvalFailureKind::cNone)
+    {
+        *mFailure = ConstEvalFailure{kind, expression, shiftCount};
+    }
+
+    return false;
+}
+
+bool ConstEvalVisitor::evaluateValue(ExpressionNode* node, ConstValue& outValue)
 {
     // Reset our state before we go, this visitor is reusable.
     mValue = ConstValue::makeInvalid();
@@ -109,7 +133,12 @@ bool ConstEvalVisitor::visitCast(CastNode* node)
     }
 
     // Apply the cast.
-    return applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType);
+    if (applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType) == false)
+    {
+        return fail(ConstEvalFailureKind::cInvalidFloatToIntCast, node);
+    }
+
+    return true;
 }
 
 bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
@@ -275,7 +304,7 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     bool argumentsOk = true;
     for (usize i = 0; i < node->mArgs.size(); ++i)
     {
-        if (evaluate(node->mArgs[i].mValue, arguments[i]) == false)
+        if (evaluateValue(node->mArgs[i].mValue, arguments[i]) == false)
         {
             argumentsOk = false;
         }
@@ -304,7 +333,7 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     {
         const FieldInitialization& field = analysis->mFields[i];
         auto* value = mAllocator.create<ConstValue>();
-        if (evaluate(field.mExpression, *value) == false)
+        if (evaluateValue(field.mExpression, *value) == false)
         {
             return false;
         }
@@ -340,7 +369,7 @@ bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
     }
 
     ConstValue receiverValue;
-    if (evaluate(node->mReceiver, receiverValue) == false)
+    if (evaluateValue(node->mReceiver, receiverValue) == false)
     {
         return false;
     }
@@ -415,7 +444,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
     ConstValue l;
     ConstValue r;
 
-    if (evaluate(node->mLeft, l) == false || evaluate(node->mRight, r) == false)
+    if (evaluateValue(node->mLeft, l) == false || evaluateValue(node->mRight, r) == false)
     {
         return false;
     }
@@ -464,7 +493,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     {
                         if (r.as.mInteger == 0)
                         {
-                            return false;
+                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
                         }
                         else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
@@ -480,7 +509,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     {
                         if (r.as.mInteger == 0)
                         {
-                            return false;
+                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
                         }
                         else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
@@ -515,7 +544,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     {
                         if (r.as.mFloat == 0.0f)
                         {
-                            return false;
+                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
                         }
                         else
                         {
@@ -527,17 +556,11 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     {
                         if (r.as.mFloat == 0.0f)
                         {
-                            return false;
+                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
                         }
                         else
                         {
-                            // Does it really make sense to even provide % for floats?
-                            // q = l / r
-                            f32 q = l.as.mFloat / r.as.mFloat;
-                            // n = floor(q)
-                            i32 n = static_cast<i32>(q);
-                            // l % r = l - (n * r)
-                            result = l.as.mFloat - (static_cast<f32>(n) * r.as.mFloat);
+                            result = std::fmod(l.as.mFloat, r.as.mFloat);
                         }
                         break;
                     }
@@ -570,7 +593,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                 {
                     if (r.as.mInteger < 0 || r.as.mInteger >= 32)
                     {
-                        return false;
+                        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
                     }
 
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) << r.as.mInteger);
@@ -580,7 +603,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                 {
                     if (r.as.mInteger < 0 || r.as.mInteger >= 32)
                     {
-                        return false;
+                        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
                     }
 
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) >> r.as.mInteger);
@@ -685,7 +708,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 {
     // Try to evaluate the condition.
     ConstValue conditionValue;
-    if (evaluate(node->mCondition, conditionValue) == false ||
+    if (evaluateValue(node->mCondition, conditionValue) == false ||
         conditionValue.mPrimitiveKind != PrimitiveTypeKind::cBool)
     {
         return false;
@@ -696,7 +719,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 
     // Evaluate that one.
     ConstValue selectedValue;
-    if (evaluate(selectedExpr, selectedValue) == false)
+    if (evaluateValue(selectedExpr, selectedValue) == false)
     {
         return false;
     }

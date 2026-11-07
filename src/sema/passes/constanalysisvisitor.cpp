@@ -143,12 +143,49 @@ bool ConstAnalysisVisitor::visitCast(CastNode* node)
 
 bool ConstAnalysisVisitor::visitNewObject(NewObjectNode* node)
 {
+    DiagnosticCheckpoint checkpoint = mCtx.mDiag.createCheckpoint();
+
     ASTWalker::visitNewObject(node);
+
+    // Argument diagnostics have already identified an invalid operation.
+    if (mCtx.mDiag.hasErrorsSince(checkpoint))
+    {
+        node->mFlags.set(cExprIsConstExpr, false);
+        return true;
+    }
 
     // Evaluate the expression to see if it is const-expr eligible.
     ConstValue value;
+    ConstEvalFailure failure;
     ConstEvalVisitor evaluator{mCtx.mAllocator};
-    node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value));
+    node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value, &failure));
+
+    switch (failure.mKind)
+    {
+        case ConstEvalFailureKind::cDivisionByZero:
+        {
+            auto* binary = static_cast<BinaryOpNode*>(failure.mExpression);
+            mCtx.report<cDivisionByZero>(binary->mRight->mSourceRange, binaryOpToString(binary->mOp));
+            break;
+        }
+        case ConstEvalFailureKind::cShiftCountOutOfRange:
+        {
+            auto* binary = static_cast<BinaryOpNode*>(failure.mExpression);
+            mCtx.report<cShiftCountOutOfRange>(binary->mRight->mSourceRange,
+                                               binaryOpToString(binary->mOp),
+                                               failure.mShiftCount);
+            break;
+        }
+        case ConstEvalFailureKind::cInvalidFloatToIntCast:
+        {
+            mCtx.report<cInvalidFloatToIntCast>(failure.mExpression->mSourceRange);
+            break;
+        }
+        case ConstEvalFailureKind::cNone:
+        {
+            break;
+        }
+    }
 
     return true;
 }
@@ -273,11 +310,13 @@ bool ConstAnalysisVisitor::visitVariableDeclarationStatement(VariableDeclaration
     }
 
     // Otherwise, resolve the initializer.
+    DiagnosticCheckpoint checkpoint = mCtx.mDiag.createCheckpoint();
     visit(node->mInit);
 
     // If this is a global but not const expr, complain.
     bool isConstExpr = node->mInit->mFlags.test(cExprIsConstExpr);
-    if (isConstExpr == false && symbol->mSymbolType == SymbolType::cGlobalVariable)
+    if (isConstExpr == false && symbol->mSymbolType == SymbolType::cGlobalVariable &&
+        mCtx.mDiag.hasNoErrorsSince(checkpoint))
     {
         mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
     }
