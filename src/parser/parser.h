@@ -21,6 +21,7 @@ class Source;
 class Tokenizer;
 struct CallArgument;
 struct ExpressionNode;
+struct FieldInitializer;
 struct Identifier;
 struct ParamNode;
 struct ParserContext;
@@ -29,7 +30,6 @@ struct TranslationUnitNode;
 struct TypeSpecifierNode;
 enum class AssignmentOp : u8;
 enum class BinaryOp : u8;
-enum class ConstructionKind : u8;
 enum class UnaryOp : u8;
 
 class Parser
@@ -133,14 +133,9 @@ private:
     ExpressionNode* parseString();
     ExpressionNode* parseFormattedString();
     ExpressionNode* parseParen();
-    ExpressionNode* parseMake();
     ExpressionNode* parseNew();
     ExpressionNode* parseLambda();
-    bool parseArgumentList(std::vector<CallArgument>& args);
-    ExpressionNode* parseClassConstruction(Token constructionToken, TypeSpecifierNode* typeSpec);
-    ExpressionNode* parseObjectConstruction(Token constructionToken,
-                                            TypeSpecifierNode* typeSpec,
-                                            ConstructionKind constructionKind);
+    bool parseArgumentList(std::vector<CallArgument>& args, std::vector<FieldInitializer*>* fields = nullptr);
     ExpressionNode* parseFunctionCall(ExpressionNode* lhs);
     ExpressionNode* parseIndexCall(ExpressionNode* lhs);
     ExpressionNode* parseMemberAccess(ExpressionNode* lhs);

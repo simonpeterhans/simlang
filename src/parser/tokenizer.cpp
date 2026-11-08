@@ -631,7 +631,6 @@ TokenType Tokenizer::getIdentifierType() const
                 case 't': return CHECK(3, "interface", TokenType::cInterface);
                 INNER_SWITCH_END
             INNER_SWITCH_END
-        case 'm': return CHECK(1, "make", TokenType::cMake);
         case 'n':
             INNER_SWITCH(1)
             case 'e': return CHECK(2, "new", TokenType::cNew);

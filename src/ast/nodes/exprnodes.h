@@ -181,31 +181,22 @@ struct CallArgument
     bool mIsInOut = false;
 };
 
-enum class ConstructionKind : u8
-{
-    cValue,
-    cReference
-};
-
 struct NewObjectNode : ExpressionNode
 {
     explicit NewObjectNode(SourceRange range,
                            TypeSpecifierNode* typeSpecifier,
                            ArrayView<FieldInitializer*> fieldInitializers,
-                           ArrayView<CallArgument> initializerArguments,
-                           ConstructionKind constructionKind)
+                           ArrayView<CallArgument> initializerArguments)
         : ExpressionNode(NodeType::cNewObject, range)
         , mTypeSpecifier(typeSpecifier)
         , mFieldInitializers(fieldInitializers)
         , mInitializerArguments(initializerArguments)
-        , mConstructionKind(constructionKind)
     {
     }
 
     TypeSpecifierNode* mTypeSpecifier;
     ArrayView<FieldInitializer*> mFieldInitializers;
     ArrayView<CallArgument> mInitializerArguments;
-    ConstructionKind mConstructionKind = ConstructionKind::cReference;
 
     // The selected class init method.
     Symbol* mInitMethodSymbol = nullptr;

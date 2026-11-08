@@ -20,6 +20,7 @@
 #include "type/typekind.h"
 #include "type/types.h"
 #include "type/typetable.h"
+#include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
 #include "util/numeric.h"
@@ -257,7 +258,7 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         return false;
     }
 
-    // Get the resolved type, which has to match the construction keyword.
+    // Construction behavior is determined by the resolved type.
     Type* baseType = node->mTypeSpecifier->mType;
     if (isMissingOrErrorType(baseType))
     {
@@ -265,17 +266,26 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         return true;
     }
 
-    // Handle list/map stuff here.
+    // Check for "new" eligibility.
+    if (baseType->mKind != TypeKind::cStruct && baseType->mKind != TypeKind::cClass &&
+        baseType->mKind != TypeKind::cList && baseType->mKind != TypeKind::cMap)
+    {
+        mCtx.report<cInvalidNewExpression>(node->mSourceRange, typeToString(baseType));
+        markError(node);
+        return true;
+    }
+
+    // Named initializers are not allowed for anything except structs.
+    if (baseType->mKind != TypeKind::cStruct && node->mFieldInitializers.empty() == false)
+    {
+        mCtx.report<cNamedConstructionRequiresStruct>(node->mSourceRange, typeToString(baseType));
+        markError(node);
+        return true;
+    }
+
+    // Lists and maps currently only support empty construction.
     if (baseType->mKind == TypeKind::cList || baseType->mKind == TypeKind::cMap)
     {
-        // Require new list/map.
-        if (node->mConstructionKind != ConstructionKind::cReference)
-        {
-            mCtx.report<cInvalidMakeExpression>(node->mSourceRange, typeToString(baseType));
-            markError(node);
-            return true;
-        }
-
         // Disallow initializer args.
         if (node->mInitializerArguments.empty() == false)
         {
@@ -288,27 +298,6 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         node->mResolvedType = baseType;
 
         return true;
-    }
-
-    if (node->mConstructionKind == ConstructionKind::cValue)
-    {
-        // If we expected a value and this is not a struct, fail.
-        if (baseType->mKind != TypeKind::cStruct)
-        {
-            mCtx.report<cInvalidMakeExpression>(node->mSourceRange, typeToString(baseType));
-            markError(node);
-            return true;
-        }
-    }
-    else
-    {
-        // If we expected a reference type and this is not a class, fail.
-        if (baseType->mKind != TypeKind::cClass)
-        {
-            mCtx.report<cInvalidNewExpression>(node->mSourceRange, typeToString(baseType));
-            markError(node);
-            return true;
-        }
     }
 
     // Set the resolved type as the type we have on the specifier.
@@ -384,6 +373,52 @@ bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
         }
 
         fields.push_back(member);
+    }
+
+    // Check if we have positional stuff for structs.
+    if (node->mInitializerArguments.empty() == false)
+    {
+        // If we have any, we expect one for each field.
+        if (node->mInitializerArguments.size() != fields.size())
+        {
+            mCtx.report<cWrongArgumentCount>(node->mSourceRange, fields.size(), node->mInitializerArguments.size());
+            markError(node);
+            return true;
+        }
+
+        // inout stuff is not allowed.
+        bool argumentsOk = true;
+        for (usize i = 0; i < node->mInitializerArguments.size(); ++i)
+        {
+            const CallArgument& argument = node->mInitializerArguments[i];
+            if (argument.mIsInOut)
+            {
+                mCtx.report<cUnexpectedInOutArgument>(argument.mSourceRange, i + 1);
+                argumentsOk = false;
+            }
+        }
+
+        // If any argument is invalid, mark the node as error.
+        if (argumentsOk == false)
+        {
+            markError(node);
+            return true;
+        }
+
+        // Otherwise, copy the call args as field initializers into the node.
+        std::vector<FieldInitializer*> initializers;
+        initializers.reserve(fields.size());
+        for (usize i = 0; i < fields.size(); ++i)
+        {
+            const CallArgument& argument = node->mInitializerArguments[i];
+            initializers.push_back(mCtx.allocate<FieldInitializer>(argument.mSourceRange,
+                                                                   argument.mValue->mSourceRange,
+                                                                   fields[i]->mIdentifier,
+                                                                   argument.mValue));
+        }
+
+        node->mFieldInitializers = makeArrayView(mCtx.mAllocator, initializers);
+        node->mInitializerArguments = {};
     }
 
     // Now validate the field initializers.

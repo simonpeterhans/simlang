@@ -54,11 +54,7 @@ public:
 
     ExpressionNode* visitNewObject(NewObjectNode* n)
     {
-        return rebuild<NewObjectNode>(n,
-                                      n->mTypeSpecifier,
-                                      n->mFieldInitializers,
-                                      n->mInitializerArguments,
-                                      n->mConstructionKind);
+        return rebuild<NewObjectNode>(n, n->mTypeSpecifier, n->mFieldInitializers, n->mInitializerArguments);
     }
 
     ExpressionNode* visitLambda(LambdaNode* n)
