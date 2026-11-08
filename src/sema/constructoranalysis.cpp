@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "ast/nodes/exprnodes.h"
+#include "ast/nodes/paramnodes.h"
 #include "ast/nodes/stmtnodes.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
@@ -150,27 +151,12 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     auto* result = mAllocator.create<ConstructorAnalysis>();
     declaration->mConstructorAnalysis = result;
 
-    // Parameters and fields may contain primitives (including strings) and nested value structs.
-    // Type composition is independent of the constructors used to create those values.
-    auto* functionType = static_cast<FunctionType*>(constructor->mType);
-    for (const FunctionParam& param : functionType->mParamTypes)
-    {
-        if (param.mIsInOut || isConstEvaluableType(param.mType) == false)
-        {
-            return result;
-        }
-    }
-
-    // Otherwise, check the fields.
+    // Collect all stored fields.
     std::vector<FieldInitialization> fields;
     for (Symbol* member : type->mSymbol->mMembers)
     {
         if (member->mSymbolType == SymbolType::cMemberVariable)
         {
-            if (isConstEvaluableType(member->mType) == false)
-            {
-                return result;
-            }
             fields.push_back({member, nullptr});
         }
     }
@@ -178,8 +164,15 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     // Look at the constructor body, if there's an explicit return statement, remove that.
     auto* body = static_cast<BlockStatementNode*>(declaration->mBody);
     usize statementCount = body->mStatements.size();
-    if (body->mStatements.back()->mNodeType == NodeType::cReturnStatement)
+    if (statementCount > 0 && body->mStatements.back()->mNodeType == NodeType::cReturnStatement)
     {
+        // A return expression can have side effects, so only a void return is allowed.
+        auto* returnStatement = static_cast<ReturnStatementNode*>(body->mStatements.back());
+        if (returnStatement->mExpressions.empty() == false)
+        {
+            return result;
+        }
+
         --statementCount;
     }
 
@@ -189,22 +182,72 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
         return result;
     }
 
-    // Then, go over all the fields and make sure it's an assignment statement to the right member.
-    // Additionally, we expect the rhs to be const-evaluable.
+    auto* functionType = static_cast<FunctionType*>(constructor->mType);
+    // Only structs are const evaluable.
+    bool isConstEvaluable = type->mKind == TypeKind::cStruct;
+    bool isTrivial = declaration->mParams.size() == fields.size();
+
+    // Parameters and fields may contain primitives and nested value structs.
+    // Type composition is independent of the constructors used to create those values.
+    if (isConstEvaluable)
+    {
+        for (const FunctionParam& param : functionType->mParamTypes)
+        {
+            if (param.mIsInOut || isConstEvaluableType(param.mType) == false)
+            {
+                // If any of them fail, the constructor is not const evaluable.
+                isConstEvaluable = false;
+                break;
+            }
+        }
+    }
+
+    // Eligible constructors initialize every field in the proper order.
+    // Match the field order once, then check triviality and constexpr eligibility independently.
     for (usize i = 0; i < fields.size(); ++i)
     {
         auto* assignment = static_cast<AssignmentStatementNode*>(body->mStatements[i]);
         auto* member = static_cast<MemberAccessNode*>(assignment->mLHS);
-        if (member->mSymbol != fields[i].mField || isConstEvaluableExpression(assignment->mRHS) == false)
+        if (member->mSymbol != fields[i].mField)
         {
+            // If the field order does not match, the constructor is not eligible (for now).
             return result;
         }
+
+        // Set the expression so that we can use it later.
         fields[i].mExpression = assignment->mRHS;
+
+        // Trivial constructors directly forward the param.
+        if (isTrivial)
+        {
+            const FunctionParam& paramType = functionType->mParamTypes[i];
+            // inout is not allowed, the types must match, and the param must be an identifier.
+            isTrivial = paramType.mIsInOut == false && paramType.mType == fields[i].mField->mType &&
+                        assignment->mRHS->mNodeType == NodeType::cIdentifier;
+            if (isTrivial)
+            {
+                // If we're still trivial, check that the param and value match.
+                auto* parameter = static_cast<ParamDeclarationNode*>(declaration->mParams[i]);
+                auto* value = static_cast<IdentifierNode*>(assignment->mRHS);
+                isTrivial = value->mSymbol == parameter->mSymbol;
+            }
+        }
+
+        if (isConstEvaluable)
+        {
+            // If we're still const evaluable, check that the field type and expression are const evaluable as well.
+            isConstEvaluable =
+                isConstEvaluableType(fields[i].mField->mType) && isConstEvaluableExpression(assignment->mRHS);
+        }
     }
 
-    // If all of this succeeded, we treat it as const-evaluable.
-    result->mFields = makeArrayView(mAllocator, fields);
-    result->mIsConstEvaluable = true;
+    // Set our stuff.
+    declaration->mIsTrivialConstructor = isTrivial;
+    if (isConstEvaluable)
+    {
+        result->mFields = makeArrayView(mAllocator, fields);
+        result->mIsConstEvaluable = true;
+    }
 
     return result;
 }

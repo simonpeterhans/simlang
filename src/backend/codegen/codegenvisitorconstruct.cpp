@@ -1,4 +1,5 @@
 #include "ast/nodes/exprnodes.h"
+#include "ast/nodes/stmtnodes.h"
 #include "backend/backendstate.h"
 #include "backend/codegen/codegenvisitor.h"
 #include "backend/typeidutils.h"
@@ -65,19 +66,35 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
         return false;
     }
 
-    // Emit the call.
-    emit<OpCode::cCallMethod>(static_cast<FunctionIdx>(constructorSymbol->mIndex));
+    auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructorSymbol->mDeclNode);
+    if (declaration->mIsTrivialConstructor)
+    {
+        // If the constructor is trivial, we have all members on the stack and can directly store them.
+        emit<OpCode::cStoreObjFieldN>(static_cast<FieldOffset>(0), static_cast<OpWordCount>(classType->mLayout->mSize));
+    }
+    else
+    {
+        // Otherwise, emit the constructor call.
+        emit<OpCode::cCallMethod>(static_cast<FunctionIdx>(constructorSymbol->mIndex));
+    }
 
     return true;
 }
 
 bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structType)
 {
+    Symbol* constructor = node->mConstructorSymbol;
+    auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructor->mDeclNode);
+    if (declaration->mIsTrivialConstructor)
+    {
+        // If the constructor is trivial, we can directly push the member values.
+        return emitCallArguments(node->mArgs, static_cast<FunctionType*>(constructor->mType));
+    }
+
     // Push zeroes and the stack address of the first word.
     emit<OpCode::cNewStruct>(static_cast<OpWordCount>(structType->mLayout->mSize));
 
     // Emit all the args.
-    Symbol* constructor = node->mConstructorSymbol;
     if (emitCallArguments(node->mArgs, static_cast<FunctionType*>(constructor->mType)) == false)
     {
         return false;

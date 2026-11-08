@@ -340,11 +340,11 @@ bool ConstAnalysisVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
     // Never do this for template declarations, instances are visited separately.
     if (node->isTemplate() == false)
     {
-        if (node->isStruct())
+        if (node->isStruct() || node->isClass())
         {
-            // Analyze the constructor's constexpr subset before constant folding changes its body.
             auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
 
+            // Analyze the constructor before constant folding changes its body.
             ConstructorAnalyzer analyzer{mCtx.mAllocator};
             analyzer.analyze(type, type->mConstructorSymbol);
         }
