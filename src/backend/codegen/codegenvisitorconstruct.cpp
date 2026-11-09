@@ -8,7 +8,7 @@
 #include "runtime/op/opcode.h"
 #include "runtime/vmdefines.h"
 #include "sema/constructoranalysis.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "symbol/constvalue.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
@@ -192,8 +192,7 @@ bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structTyp
     {
         // Constant analysis has already validated the complete construction, including its arguments.
         ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node, value);
+        mCtx.mConstEvaluator.evaluate(node, value);
         return emitConstValue(value, structType);
     }
 

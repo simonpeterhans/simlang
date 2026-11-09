@@ -26,8 +26,9 @@
 namespace simlang
 {
 
-ConstEvalVisitor::ConstEvalVisitor(ArenaAllocator& allocator)
-    : mAllocator(allocator)
+ConstEvalVisitor::ConstEvalVisitor(ConstEvaluator& evaluator)
+    : mEvaluator(evaluator)
+    , mAllocator(evaluator.getAllocator())
 {
 }
 
@@ -43,6 +44,24 @@ bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue, Cons
     return evaluateValue(node, outValue);
 }
 
+bool ConstEvalVisitor::evaluateSymbol(Symbol* symbol, ConstValue& outValue, ConstEvalFailure* failure)
+{
+    if (failure != nullptr)
+    {
+        *failure = {};
+    }
+
+    ScopedValueBinder failureScope{mFailure, failure};
+
+    mValue = ConstValue::makeInvalid();
+
+    bool success = evaluateSymbolValue(symbol);
+
+    outValue = success ? mValue : ConstValue::makeInvalid();
+
+    return success;
+}
+
 bool ConstEvalVisitor::fail(ConstEvalFailureKind kind, ExpressionNode* expression, i32 shiftCount)
 {
     // Later constructor arguments must still evaluate without overwriting the first failure.
@@ -56,8 +75,14 @@ bool ConstEvalVisitor::fail(ConstEvalFailureKind kind, ExpressionNode* expressio
 
 bool ConstEvalVisitor::evaluateValue(ExpressionNode* node, ConstValue& outValue)
 {
-    // Reset our state before we go, this visitor is reusable.
+    // Each subtree query replaces the current result.
     mValue = ConstValue::makeInvalid();
+
+    if (node == nullptr)
+    {
+        outValue = mValue;
+        return false;
+    }
 
     if (visit(node) == false)
     {
@@ -66,7 +91,6 @@ bool ConstEvalVisitor::evaluateValue(ExpressionNode* node, ConstValue& outValue)
     }
 
     outValue = mValue;
-
     return true;
 }
 
@@ -115,7 +139,7 @@ static bool applyConstCast(ConstValue& value, Type* sourceType, Type* targetType
 bool ConstEvalVisitor::visitImplicitCast(ImplicitCastNode* node)
 {
     // Resolve the target type.
-    if (visit(node->mTarget) == false)
+    if (evaluateValue(node->mTarget, mValue) == false)
     {
         return false;
     }
@@ -127,7 +151,7 @@ bool ConstEvalVisitor::visitImplicitCast(ImplicitCastNode* node)
 bool ConstEvalVisitor::visitCast(CastNode* node)
 {
     // Resolve the target type.
-    if (visit(node->mTarget) == false)
+    if (evaluateValue(node->mTarget, mValue) == false)
     {
         return false;
     }
@@ -143,8 +167,11 @@ bool ConstEvalVisitor::visitCast(CastNode* node)
 
 bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 {
-    Symbol* s = node->mSymbol;
+    return evaluateSymbolValue(node->mSymbol);
+}
 
+bool ConstEvalVisitor::evaluateSymbolValue(Symbol* s)
+{
     // Check if this is a parameter, in which case we might be evaluating a call.
     if (s->mSymbolType == SymbolType::cParameter)
     {
@@ -215,10 +242,8 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
     auto* decl = static_cast<VariableDeclarationStatementNode*>(s->mDeclNode);
     // Global initializers are independent of the constructor that requested their value.
     ScopedValueBinder frameScope{mFrame, s->mSymbolType == SymbolType::cGlobalVariable ? nullptr : mFrame};
-    // It's possible for mInit to be null if we have a multi-variable declaration.
-    // We do not currently allow this to be const evaluable, and so we need to make sure that is correct.
-    // (visit(nullptr) returns true, so visit(decl->mInit) is not enough.)
-    if (decl->mInit == nullptr || visit(decl->mInit) == false)
+    // Multi-variable bindings have no individual initializer and cannot currently be constant evaluated.
+    if (evaluateValue(decl->mInit, mValue) == false)
     {
         s->mConstEvalState = ConstEvalState::cFailed;
         return false;
@@ -290,18 +315,9 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
         return false;
     }
 
-    // Reuse only closed constructions.
-    // Within a call frame, parameter values and recursion checks are per invocation.
-    bool isClosedEvaluation = mFrame == nullptr;
-    if (isClosedEvaluation && node->mConstValue != nullptr)
-    {
-        mValue = ConstValue::makeStruct(node->mConstValue);
-        return true;
-    }
-
     // Get the constructor analysis.
     auto* type = static_cast<AggregateType*>(node->mResolvedType);
-    ConstructorAnalyzer analyzer{mAllocator};
+    ConstructorAnalyzer analyzer{mEvaluator};
     const ConstructorAnalysis* analysis = analyzer.analyze(type, node->mConstructorSymbol);
 
     // Only constructors with a supported field-assignment body can be evaluated.
@@ -359,17 +375,11 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
         fields[field.mFieldIndex] = {field.mField, value};
     }
 
-    // Then, create the const value for the struct and store it.
+    // Then, create the const value for the struct.
     auto* result = mAllocator.create<ConstStructValue>();
     result->mType = type;
     result->mFields = {fields, analysis->mFields.size()};
     mValue = ConstValue::makeStruct(result);
-
-    // Cache successes only, a failed evaluation must retain its diagnostics and remain retryable.
-    if (isClosedEvaluation)
-    {
-        node->mConstValue = result;
-    }
 
     return true;
 }
@@ -414,12 +424,12 @@ bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
 
 bool ConstEvalVisitor::visitModuleAccess(ModuleAccessNode* node)
 {
-    return visit(node->mRight);
+    return evaluateValue(node->mRight, mValue);
 }
 
 bool ConstEvalVisitor::visitUnaryOp(UnaryOpNode* node)
 {
-    if (visit(node->mExpr) == false)
+    if (evaluateValue(node->mExpr, mValue) == false)
     {
         return false;
     }
@@ -506,6 +516,17 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
 
     PrimitiveTypeKind kind = l.mPrimitiveKind;
 
+    if ((node->mOp == BinaryOp::cDiv || node->mOp == BinaryOp::cMod) && isValidConstDivisor(r) == false)
+    {
+        return fail(ConstEvalFailureKind::cDivisionByZero, node);
+    }
+
+    if ((node->mOp == BinaryOp::cShiftL || node->mOp == BinaryOp::cShiftR) &&
+        isValidConstShiftCount(r.as.mInteger) == false)
+    {
+        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
+    }
+
     switch (node->mOp)
     {
         case BinaryOp::cAdd:
@@ -528,11 +549,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     case BinaryOp::cMul: result = static_cast<i32>(lhs * rhs); break;
                     case BinaryOp::cDiv:
                     {
-                        if (r.as.mInteger == 0)
-                        {
-                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
-                        }
-                        else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
+                        if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
                             result = std::numeric_limits<i32>::min();
                         }
@@ -544,11 +561,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     }
                     case BinaryOp::cMod:
                     {
-                        if (r.as.mInteger == 0)
-                        {
-                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
-                        }
-                        else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
+                        if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
                             result = 0;
                         }
@@ -577,30 +590,8 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     case BinaryOp::cAdd: result = l.as.mFloat + r.as.mFloat; break;
                     case BinaryOp::cSub: result = l.as.mFloat - r.as.mFloat; break;
                     case BinaryOp::cMul: result = l.as.mFloat * r.as.mFloat; break;
-                    case BinaryOp::cDiv:
-                    {
-                        if (r.as.mFloat == 0.0f)
-                        {
-                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
-                        }
-                        else
-                        {
-                            result = l.as.mFloat / r.as.mFloat;
-                        }
-                        break;
-                    }
-                    case BinaryOp::cMod:
-                    {
-                        if (r.as.mFloat == 0.0f)
-                        {
-                            return fail(ConstEvalFailureKind::cDivisionByZero, node);
-                        }
-                        else
-                        {
-                            result = std::fmod(l.as.mFloat, r.as.mFloat);
-                        }
-                        break;
-                    }
+                    case BinaryOp::cDiv: result = l.as.mFloat / r.as.mFloat; break;
+                    case BinaryOp::cMod: result = std::fmod(l.as.mFloat, r.as.mFloat); break;
                     default:
                     {
                         return false;
@@ -628,21 +619,11 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                 case BinaryOp::cBitXor: result = l.as.mInteger ^ r.as.mInteger; break;
                 case BinaryOp::cShiftL:
                 {
-                    if (r.as.mInteger < 0 || r.as.mInteger >= 32)
-                    {
-                        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
-                    }
-
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) << r.as.mInteger);
                     break;
                 }
                 case BinaryOp::cShiftR:
                 {
-                    if (r.as.mInteger < 0 || r.as.mInteger >= 32)
-                    {
-                        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
-                    }
-
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) >> r.as.mInteger);
                     break;
                 }

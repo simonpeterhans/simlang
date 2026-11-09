@@ -5,7 +5,7 @@
 #include "ast/nodes/stmtnodes.h"
 #include "diag/diagnosticmanager.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "symbol/constvalue.h"
 #include "type/typekind.h"
 #include "type/types.h"
@@ -240,8 +240,7 @@ void ConstFoldVisitor::foldExpr(ExpressionNode*& e)
     if (e->mFlags.test(cExprIsConstExpr))
     {
         ConstValue cv;
-        ConstEvalVisitor ev{mCtx.mAllocator};
-        if (ev.evaluate(e, cv))
+        if (mCtx.mConstEvaluator.evaluate(e, cv))
         {
             ExpressionNode* lit = makeLiteral(e, cv);
             if (lit != nullptr)
@@ -269,8 +268,7 @@ ExpressionNode* ConstFoldVisitor::foldTernaryExpr(TernaryExprNode* node)
     if (node->mCondition->mFlags.test(cExprIsConstExpr))
     {
         ConstValue condition;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node->mCondition, condition);
+        mCtx.mConstEvaluator.evaluate(node->mCondition, condition);
 
         // The other branch is dropped, so we only evaluate one.
         ExpressionNode* selected = condition.as.mBool ? node->mThenExpr : node->mElseExpr;

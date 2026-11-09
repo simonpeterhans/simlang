@@ -8,6 +8,7 @@ namespace simlang
 {
 
 struct CompilerContext;
+struct ConstEvalFailure;
 
 class ConstAnalysisVisitor : public ASTWalker<ConstAnalysisVisitor>
 {
@@ -31,6 +32,7 @@ public:
     bool visitSwitchStatement(SwitchStatementNode* node);
 
 private:
+    void reportFailure(const ConstEvalFailure& failure);
     bool checkDivisor(ExpressionNode* expr, std::string_view op);
     bool checkShiftCount(ExpressionNode* expr, std::string_view op);
 

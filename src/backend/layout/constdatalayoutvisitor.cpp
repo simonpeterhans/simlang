@@ -15,7 +15,7 @@
 #include "runtime/stringdata.h"
 #include "runtime/vmdefines.h"
 #include "sema/constructoranalysis.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "source/sourcerange.h"
 #include "symbol/constvalue.h"
 #include "symbol/internedstring.h"
@@ -202,8 +202,7 @@ bool ConstDataLayoutVisitor::writeConstGlobalInitializer(VariableDeclarationStat
 
     // Constant analysis has already validated this initializer.
     ConstValue value;
-    ConstEvalVisitor evaluator{mCtx.mAllocator};
-    evaluator.evaluate(node->mInit, value);
+    mCtx.mConstEvaluator.evaluate(node->mInit, value);
 
     Symbol* symbol = node->mSymbol;
     return writeConstGlobalValue(symbol->mType, static_cast<u32>(symbol->mIndex), value);
@@ -277,8 +276,7 @@ bool ConstDataLayoutVisitor::visitNewObject(NewObjectNode* node)
     if (node->mFlags.test(cExprIsConstExpr))
     {
         ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node, value);
+        mCtx.mConstEvaluator.evaluate(node, value);
         registerConstValueStrings(value);
     }
 

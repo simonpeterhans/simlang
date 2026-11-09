@@ -6,7 +6,7 @@
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/paramnodes.h"
 #include "ast/nodes/stmtnodes.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
 #include "util/arenautils.h"
@@ -14,8 +14,9 @@
 namespace simlang
 {
 
-ConstructorAnalyzer::ConstructorAnalyzer(ArenaAllocator& allocator)
-    : mAllocator(allocator)
+ConstructorAnalyzer::ConstructorAnalyzer(ConstEvaluator& evaluator)
+    : mConstEvaluator(evaluator)
+    , mAllocator(evaluator.getAllocator())
 {
 }
 
@@ -124,8 +125,7 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
             {
                 // Evaluate without parameter bindings so that the constant is independent of each call.
                 ConstValue value;
-                ConstEvalVisitor evaluator{mAllocator};
-                isTrivial = evaluator.evaluate(assignment->mRHS, value);
+                isTrivial = mConstEvaluator.evaluate(assignment->mRHS, value);
                 if (isTrivial)
                 {
                     fields[i].mConstantValue = mAllocator.create<ConstValue>(value);

@@ -1,35 +1,20 @@
 #pragma once
 
 #include "ast/astwalker.h"
-#include "symbol/constvalue.h"
+#include "sema/constevaluator.h"
 
 namespace simlang
 {
 
 class ArenaAllocator;
 
-enum class ConstEvalFailureKind : u8
-{
-    cNone,
-    cDivisionByZero,
-    cShiftCountOutOfRange,
-    cInvalidFloatToIntCast
-};
-
-struct ConstEvalFailure
-{
-    ConstEvalFailureKind mKind = ConstEvalFailureKind::cNone;
-    ExpressionNode* mExpression = nullptr;
-    i32 mShiftCount = 0;
-};
-
 class ConstEvalVisitor : public ASTWalker<ConstEvalVisitor>
 {
 public:
-    explicit ConstEvalVisitor(ArenaAllocator& allocator);
+    explicit ConstEvalVisitor(ConstEvaluator& evaluator);
 
-    // A false result without a failure means the expression cannot be evaluated at compile time.
-    bool evaluate(ExpressionNode* node, ConstValue& outValue, ConstEvalFailure* failure = nullptr);
+    bool evaluate(ExpressionNode* node, ConstValue& outValue, ConstEvalFailure* failure);
+    bool evaluateSymbol(Symbol* symbol, ConstValue& outValue, ConstEvalFailure* failure);
 
     bool visitImplicitCast(ImplicitCastNode* node);
     bool visitCast(CastNode* node);
@@ -52,6 +37,7 @@ public:
     bool visitTernaryExpr(TernaryExprNode* node);
 
 private:
+    bool evaluateSymbolValue(Symbol* symbol);
     bool evaluateValue(ExpressionNode* node, ConstValue& outValue);
     bool fail(ConstEvalFailureKind kind, ExpressionNode* expression, i32 shiftCount = 0);
 
@@ -62,6 +48,7 @@ private:
         const CallFrame* mCaller;
     };
 
+    ConstEvaluator& mEvaluator;
     ArenaAllocator& mAllocator;
     const CallFrame* mFrame = nullptr;
     ConstEvalFailure* mFailure = nullptr;

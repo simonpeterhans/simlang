@@ -9,6 +9,7 @@
 #include "module/modulemanager.h"
 #include "parser/parsercontext.h"
 #include "runtime/syscall/syscallregistry.h"
+#include "sema/constevaluator.h"
 #include "sema/scopes.h"
 #include "sema/templateinstantiationcache.h"
 #include "source/sourcemanager.h"
@@ -35,6 +36,7 @@ struct CompilerContext
         , mSymbols(mAllocator)
         , mTypes(mAllocator)
         , mModules(mDiag, mIdentifiers, mSymbols)
+        , mConstEvaluator(mAllocator)
     {
     }
 
@@ -47,6 +49,7 @@ struct CompilerContext
         , mSymbols(mAllocator)
         , mTypes(mAllocator)
         , mModules(mDiag, mIdentifiers, mSymbols)
+        , mConstEvaluator(mAllocator)
     {
     }
 
@@ -92,6 +95,7 @@ struct CompilerContext
     ScopeManager mScopes;
     ModuleManager mModules;
     TemplateInstantiationCache mTemplateCache;
+    ConstEvaluator mConstEvaluator;
 
     // Shared host/runtime binding stuff.
     SyscallRegistry mSyscalls;

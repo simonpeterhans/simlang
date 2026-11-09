@@ -6,6 +6,7 @@ namespace simlang
 {
 
 class ArenaAllocator;
+class ConstEvaluator;
 struct AggregateType;
 struct ConstValue;
 struct ExpressionNode;
@@ -30,11 +31,12 @@ struct ConstructorAnalysis
 class ConstructorAnalyzer
 {
 public:
-    explicit ConstructorAnalyzer(ArenaAllocator& allocator);
+    explicit ConstructorAnalyzer(ConstEvaluator& evaluator);
 
     const ConstructorAnalysis* analyze(AggregateType* type, Symbol* constructor);
 
 private:
+    ConstEvaluator& mConstEvaluator;
     ArenaAllocator& mAllocator;
 };
 

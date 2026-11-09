@@ -131,6 +131,8 @@ target_sources(simlang PRIVATE
         runtime/vm/vmstack.cpp
         runtime/vm/vmstack.h
         runtime/vmdefines.h
+        sema/constevaluator.cpp
+        sema/constevaluator.h
         sema/constructoranalysis.cpp
         sema/constructoranalysis.h
         sema/passes/constanalysisvisitor.cpp

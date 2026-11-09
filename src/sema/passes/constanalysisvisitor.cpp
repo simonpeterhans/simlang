@@ -9,13 +9,12 @@
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
 #include "sema/constructoranalysis.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "symbol/constvalue.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
 #include "type/typekind.h"
 #include "type/types.h"
-#include "util/numeric.h"
 
 namespace simlang
 {
@@ -71,7 +70,6 @@ bool ConstAnalysisVisitor::run(ASTNode* node)
     collector.visit(node);
 
     // Analyze module initializers and type declarations before the independent callable bodies.
-    // When encountering
     visit(node);
 
     // Analyze all the bodies.
@@ -104,8 +102,7 @@ void ConstAnalysisVisitor::leaveNode(ASTNode* node)
             // This is because we may not have evaluated the expression that initializes the identifier.
             auto* expr = static_cast<ExpressionNode*>(node);
             ConstValue value;
-            ConstEvalVisitor evaluator{mCtx.mAllocator};
-            expr->mFlags.set(cExprIsConstExpr, evaluator.evaluate(expr, value));
+            expr->mFlags.set(cExprIsConstExpr, mCtx.mConstEvaluator.evaluate(expr, value));
             break;
         }
         case NodeType::cImplicitCast:
@@ -151,22 +148,14 @@ bool ConstAnalysisVisitor::visitCast(CastNode* node)
     // Check if the target is const expr.
     bool isConstExpr = node->mTarget->mFlags.test(cExprIsConstExpr);
 
-    // If it's float to int, check if it fails or not.
+    // Let the evaluator perform the checked conversion.
     if (isConstExpr && getPrimitiveKind(node->mTarget->mResolvedType) == PrimitiveTypeKind::cFloat &&
         getPrimitiveKind(node->mResolvedType) == PrimitiveTypeKind::cInt)
     {
-        // Evaluate the expression.
         ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node->mTarget, value);
-
-        // Convert the float to int and see if we allow that.
-        i32 converted = 0;
-        if (checkedFloatToInt(value.as.mFloat, converted) == false)
-        {
-            mCtx.report<cInvalidFloatToIntCast>(node->mSourceRange);
-            isConstExpr = false;
-        }
+        ConstEvalFailure failure;
+        isConstExpr = mCtx.mConstEvaluator.evaluate(node, value, &failure);
+        reportFailure(failure);
     }
 
     node->mFlags.set(cExprIsConstExpr, isConstExpr);
@@ -190,9 +179,14 @@ bool ConstAnalysisVisitor::visitNewObject(NewObjectNode* node)
     // Evaluate the expression to see if it is const-expr eligible.
     ConstValue value;
     ConstEvalFailure failure;
-    ConstEvalVisitor evaluator{mCtx.mAllocator};
-    node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value, &failure));
+    node->mFlags.set(cExprIsConstExpr, mCtx.mConstEvaluator.evaluate(node, value, &failure));
+    reportFailure(failure);
 
+    return true;
+}
+
+void ConstAnalysisVisitor::reportFailure(const ConstEvalFailure& failure)
+{
     switch (failure.mKind)
     {
         case ConstEvalFailureKind::cDivisionByZero:
@@ -219,8 +213,6 @@ bool ConstAnalysisVisitor::visitNewObject(NewObjectNode* node)
             break;
         }
     }
-
-    return true;
 }
 
 bool ConstAnalysisVisitor::visitLambda(LambdaNode*)
@@ -263,10 +255,12 @@ bool ConstAnalysisVisitor::checkDivisor(ExpressionNode* expr, std::string_view o
 
     // Otherwise, check if we would be dividing by 0.
     ConstValue value;
-    ConstEvalVisitor evaluator{mCtx.mAllocator};
-    evaluator.evaluate(expr, value);
-    if ((value.mPrimitiveKind == PrimitiveTypeKind::cInt && value.as.mInteger == 0) ||
-        (value.mPrimitiveKind == PrimitiveTypeKind::cFloat && value.as.mFloat == 0.0f))
+    if (mCtx.mConstEvaluator.evaluate(expr, value) == false)
+    {
+        return true;
+    }
+
+    if (isValidConstDivisor(value) == false)
     {
         mCtx.report<cDivisionByZero>(expr->mSourceRange, op);
         return false;
@@ -285,9 +279,12 @@ bool ConstAnalysisVisitor::checkShiftCount(ExpressionNode* expr, std::string_vie
 
     // Otherwise, check if we would be shifting out of range.
     ConstValue value;
-    ConstEvalVisitor evaluator{mCtx.mAllocator};
-    evaluator.evaluate(expr, value);
-    if (value.as.mInteger < 0 || value.as.mInteger >= 32)
+    if (mCtx.mConstEvaluator.evaluate(expr, value) == false)
+    {
+        return true;
+    }
+
+    if (isValidConstShiftCount(value.as.mInteger) == false)
     {
         mCtx.report<cShiftCountOutOfRange>(expr->mSourceRange, op, value.as.mInteger);
         return false;
@@ -306,8 +303,7 @@ bool ConstAnalysisVisitor::visitBinaryOp(BinaryOpNode* node)
     if (leftIsConstExpr && (node->mOp == BinaryOp::cAnd || node->mOp == BinaryOp::cOr))
     {
         ConstValue left;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node->mLeft, left);
+        mCtx.mConstEvaluator.evaluate(node->mLeft, left);
         skipsRight = left.as.mBool == (node->mOp == BinaryOp::cOr);
     }
 
@@ -342,8 +338,7 @@ bool ConstAnalysisVisitor::visitTernaryExpr(TernaryExprNode* node)
     {
         // If it is, evaluate it so we know which branch is taken.
         ConstValue condition;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(node->mCondition, condition);
+        mCtx.mConstEvaluator.evaluate(node->mCondition, condition);
 
         // Once we know that, select and test that branch.
         ExpressionNode* selected = condition.as.mBool ? node->mThenExpr : node->mElseExpr;
@@ -400,15 +395,11 @@ bool ConstAnalysisVisitor::visitVariableDeclarationStatement(VariableDeclaration
         mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
     }
 
-    // If this is a const and not yet evaluated, do that now.
-    if (symbol->mFlags.test(SymbolFlags::cMutable) == false && symbol->mConstEvalState != ConstEvalState::cReady)
+    // Declaration and identifier queries share the same symbol evaluation and cycle bookkeeping.
+    if (symbol->mFlags.test(SymbolFlags::cMutable) == false)
     {
-        if (isConstExpr)
-        {
-            ConstEvalVisitor evaluator{mCtx.mAllocator};
-            evaluator.evaluate(node->mInit, symbol->mConstValue);
-        }
-        symbol->mConstEvalState = isConstExpr ? ConstEvalState::cReady : ConstEvalState::cFailed;
+        ConstValue value;
+        mCtx.mConstEvaluator.evaluateSymbol(symbol, value);
     }
 
     return true;
@@ -430,7 +421,7 @@ bool ConstAnalysisVisitor::visitTypeDeclarationStatement(TypeDeclarationStatemen
             auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
 
             // Analyze the constructor before constant folding changes its body.
-            ConstructorAnalyzer analyzer{mCtx.mAllocator};
+            ConstructorAnalyzer analyzer{mCtx.mConstEvaluator};
             analyzer.analyze(type, type->mConstructorSymbol);
         }
         ASTWalker::visitTypeDeclarationStatement(node);
@@ -464,8 +455,7 @@ bool ConstAnalysisVisitor::visitSwitchStatement(SwitchStatementNode* node)
 
         // Make sure we don't have any duplicate case labels.
         ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        evaluator.evaluate(section->mCaseExpression, value);
+        mCtx.mConstEvaluator.evaluate(section->mCaseExpression, value);
 
         if (cases.insert(value.as.mInteger).second == false)
         {
