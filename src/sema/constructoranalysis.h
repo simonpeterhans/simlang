@@ -17,6 +17,7 @@ struct FieldInitialization
     ExpressionNode* mExpression = nullptr;
     const ConstValue* mConstantValue = nullptr;
     usize mParameterIndex = 0;
+    usize mFieldIndex = 0;
 };
 
 struct ConstructorAnalysis

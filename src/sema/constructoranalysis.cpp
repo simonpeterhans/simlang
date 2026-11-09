@@ -1,5 +1,6 @@
 #include "sema/constructoranalysis.h"
 
+#include <unordered_map>
 #include <vector>
 
 #include "ast/nodes/exprnodes.h"
@@ -32,13 +33,13 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     auto* result = mAllocator.create<ConstructorAnalysis>();
     declaration->mConstructorAnalysis = result;
 
-    // Collect all stored fields.
-    std::vector<FieldInitialization> fields;
+    // Record declaration indices without depending on backend layout.
+    std::unordered_map<Symbol*, usize> fieldIndices;
     for (Symbol* member : type->mSymbol->mMembers)
     {
         if (member->mSymbolType == SymbolType::cMemberVariable)
         {
-            fields.push_back({member, nullptr});
+            fieldIndices.emplace(member, fieldIndices.size());
         }
     }
 
@@ -58,7 +59,7 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     }
 
     // We expect exactly one statement for each member variable in the constructor.
-    if (statementCount != fields.size())
+    if (statementCount != fieldIndices.size())
     {
         return result;
     }
@@ -83,20 +84,23 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
         }
     }
 
-    // Eligible constructors initialize every field in the proper order.
-    // Match the field order once, then retain the assignments for per-call constant evaluation.
-    for (usize i = 0; i < fields.size(); ++i)
+    // Constant evaluation follows statement order, direct emission additionally requires declaration order.
+    std::vector<FieldInitialization> fields;
+    fields.reserve(statementCount);
+    for (usize i = 0; i < statementCount; ++i)
     {
         auto* assignment = static_cast<AssignmentStatementNode*>(body->mStatements[i]);
         auto* member = static_cast<MemberAccessNode*>(assignment->mLHS);
-        if (member->mSymbol != fields[i].mField)
+        auto fieldIndex = fieldIndices.find(member->mSymbol);
+        if (fieldIndex == fieldIndices.end())
         {
-            // If the field order does not match, the constructor is not eligible (for now).
+            // Every stored field must be initialized exactly once.
             return result;
         }
 
-        // Set the expression so that we can use it later.
-        fields[i].mExpression = assignment->mRHS;
+        fields.push_back({member->mSymbol, assignment->mRHS, nullptr, 0, fieldIndex->second});
+        isTrivial = isTrivial && fieldIndex->second == i;
+        fieldIndices.erase(fieldIndex);
 
         // Trivial constructors forward each parameter once in order, with constant fields in between.
         if (isTrivial)

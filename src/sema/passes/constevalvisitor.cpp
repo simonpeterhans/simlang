@@ -338,18 +338,16 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     };
     ScopedValueBinder<const CallFrame*> frameScope{mFrame, &frame};
 
-    // Now, evaluate all the fields of the struct.
-    // For this, we take the expressions for the fields from the analayis and evaluate them.
+    // Evaluate assignments in statement order, but store the result in declaration order for layout and equality.
     auto* fields = mAllocator.createArray<ConstFieldValue>(analysis->mFields.size());
-    for (usize i = 0; i < analysis->mFields.size(); ++i)
+    for (const FieldInitialization& field : analysis->mFields)
     {
-        const FieldInitialization& field = analysis->mFields[i];
         auto* value = mAllocator.create<ConstValue>();
         if (evaluateValue(field.mExpression, *value) == false)
         {
             return false;
         }
-        fields[i] = {field.mField, value};
+        fields[field.mFieldIndex] = {field.mField, value};
     }
 
     // Then, create the const value for the struct and store it.
