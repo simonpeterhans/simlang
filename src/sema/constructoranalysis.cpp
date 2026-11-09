@@ -5,6 +5,7 @@
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/paramnodes.h"
 #include "ast/nodes/stmtnodes.h"
+#include "sema/passes/constevalvisitor.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
 #include "util/arenautils.h"
@@ -19,13 +20,14 @@ ConstructorAnalyzer::ConstructorAnalyzer(ArenaAllocator& allocator)
 
 bool ConstructorAnalyzer::isConstEvaluableType(Type* type)
 {
-    // Primitives are always const-evaluable.
-    if (type->mKind == TypeKind::cPrimitive)
+    // Primitives are always const-evaluable, and reference types can have constant null values.
+    if (type->mKind == TypeKind::cPrimitive || type->mKind == TypeKind::cClass || type->mKind == TypeKind::cList ||
+        type->mKind == TypeKind::cMap || type->mKind == TypeKind::cInterface)
     {
         return true;
     }
 
-    // Non-struct types (that are not primitives) are never const-evaluable.
+    // Other types must be recursively eligible structs.
     if (type->mKind != TypeKind::cStruct)
     {
         return false;
@@ -65,6 +67,7 @@ bool ConstructorAnalyzer::isConstEvaluableExpression(ExpressionNode* node)
         case NodeType::cFloatLiteral:
         case NodeType::cBoolLiteral:
         case NodeType::cStringLiteral:
+        case NodeType::cNullLiteral:
         {
             // Literals are always eligible.
             return true;
@@ -185,9 +188,10 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     auto* functionType = static_cast<FunctionType*>(constructor->mType);
     // Only structs are const evaluable.
     bool isConstEvaluable = type->mKind == TypeKind::cStruct;
-    bool isTrivial = declaration->mParams.size() == fields.size();
+    bool isTrivial = true;
+    usize parameterIndex = 0;
 
-    // Parameters and fields may contain primitives and nested value structs.
+    // Parameters and fields may contain primitives, null references, and nested value structs.
     // Type composition is independent of the constructors used to create those values.
     if (isConstEvaluable)
     {
@@ -217,19 +221,36 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
         // Set the expression so that we can use it later.
         fields[i].mExpression = assignment->mRHS;
 
-        // Trivial constructors directly forward the param.
+        // Trivial constructors forward each parameter once in order, with constant fields in between.
         if (isTrivial)
         {
-            const FunctionParam& paramType = functionType->mParamTypes[i];
-            // inout is not allowed, the types must match, and the param must be an identifier.
-            isTrivial = paramType.mIsInOut == false && paramType.mType == fields[i].mField->mType &&
-                        assignment->mRHS->mNodeType == NodeType::cIdentifier;
-            if (isTrivial)
+            bool forwardsParameter = false;
+            if (parameterIndex < declaration->mParams.size() && assignment->mRHS->mNodeType == NodeType::cIdentifier)
             {
-                // If we're still trivial, check that the param and value match.
-                auto* parameter = static_cast<ParamDeclarationNode*>(declaration->mParams[i]);
+                const FunctionParam& paramType = functionType->mParamTypes[parameterIndex];
+                auto* parameter = static_cast<ParamDeclarationNode*>(declaration->mParams[parameterIndex]);
                 auto* value = static_cast<IdentifierNode*>(assignment->mRHS);
-                isTrivial = value->mSymbol == parameter->mSymbol;
+                // inout is not allowed, the types must match, and the parameter and value must match.
+                forwardsParameter = paramType.mIsInOut == false && paramType.mType == fields[i].mField->mType &&
+                                    value->mSymbol == parameter->mSymbol;
+            }
+
+            if (forwardsParameter)
+            {
+                fields[i].mParameterIndex = parameterIndex++;
+            }
+            else
+            {
+                // Evaluate without parameter bindings so that the constant is independent of each call.
+                ConstValue value;
+                ConstEvalVisitor evaluator{mAllocator};
+                isTrivial = evaluator.evaluate(assignment->mRHS, value) &&
+                            (value.mKind == ConstValueKind::cPrimitive || value.mKind == ConstValueKind::cStruct ||
+                             value.mKind == ConstValueKind::cNull);
+                if (isTrivial)
+                {
+                    fields[i].mConstantValue = mAllocator.create<ConstValue>(value);
+                }
             }
         }
 
@@ -242,12 +263,12 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     }
 
     // Set our stuff.
-    declaration->mIsTrivialConstructor = isTrivial;
-    if (isConstEvaluable)
+    declaration->mIsTrivialConstructor = isTrivial && parameterIndex == declaration->mParams.size();
+    if (declaration->mIsTrivialConstructor || isConstEvaluable)
     {
         result->mFields = makeArrayView(mAllocator, fields);
-        result->mIsConstEvaluable = true;
     }
+    result->mIsConstEvaluable = isConstEvaluable;
 
     return result;
 }

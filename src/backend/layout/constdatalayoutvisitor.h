@@ -23,6 +23,7 @@ public:
     bool visitIdentifier(IdentifierNode* node);
     bool visitStringLiteral(StringLiteralNode* node);
     bool visitFormatString(FormatStringNode* node);
+    bool visitNewObject(NewObjectNode* node);
 
     // Statements.
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
@@ -30,6 +31,7 @@ public:
 
 private:
     StringLiteralIdx addStringLiteral(const InternedString* str);
+    void registerConstValueStrings(const ConstValue& value);
     bool writeConstGlobalInitializer(VariableDeclarationStatementNode* node);
     bool writeConstGlobalValue(Type* type, u32 globalIdx, const ConstValue& value);
 

@@ -9,6 +9,7 @@ namespace simlang
 
 class ArenaAllocator;
 struct AggregateType;
+struct ConstValue;
 struct ExpressionNode;
 struct Symbol;
 struct Type;
@@ -17,6 +18,10 @@ struct FieldInitialization
 {
     Symbol* mField = nullptr;
     ExpressionNode* mExpression = nullptr;
+
+    // Trivial construction uses the constant when present, otherwise the forwarded parameter.
+    usize mParameterIndex = 0;
+    const ConstValue* mConstantValue = nullptr;
 };
 
 struct ConstructorAnalysis
