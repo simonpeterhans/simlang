@@ -35,7 +35,7 @@ enum class PrimitiveTypeKind : u8;
 class CodeGenVisitor : public ASTWalker<CodeGenVisitor>
 {
 public:
-    explicit CodeGenVisitor(CompilerContext& ctx);
+    explicit CodeGenVisitor(CompilerContext& ctx, bool optimize);
 
     bool emitLambdaBodies();
 
@@ -190,6 +190,7 @@ private:
 
     CompilerContext& mCtx;
     BytecodeBuilder mBytecodeBuilder;
+    bool mOptimize;
 
     std::vector<ControlContext> mControlStack;
     std::vector<SourceRange> mSourceRangeStack;

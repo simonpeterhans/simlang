@@ -149,7 +149,7 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
 
     Symbol* constructorSymbol = node->mConstructorSymbol;
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructorSymbol->mDeclNode);
-    if (declaration->mIsTrivialConstructor)
+    if (mOptimize && declaration->mIsTrivialConstructor)
     {
         if (emitTrivialConstructorFields(node, declaration->mConstructorAnalysis) == false)
         {
@@ -177,13 +177,13 @@ bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structTyp
 {
     Symbol* constructor = node->mConstructorSymbol;
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructor->mDeclNode);
-    if (declaration->mIsTrivialConstructor)
+    if (mOptimize && declaration->mIsTrivialConstructor)
     {
         // If the constructor is trivial, we can directly push the member values.
         return emitTrivialConstructorFields(node, declaration->mConstructorAnalysis);
     }
 
-    if (node->mFlags.test(cExprIsConstExpr))
+    if (mOptimize && node->mFlags.test(cExprIsConstExpr))
     {
         // Constant analysis has already validated the complete construction, including its arguments.
         ConstValue value;

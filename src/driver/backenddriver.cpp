@@ -144,7 +144,7 @@ bool BackendDriver::doCodeGen()
     static constexpr const char* cPhaseName = "Generating bytecode";
 
     const std::vector<std::unique_ptr<ModuleEntry>>& modules = mCtx.mModules.getModules();
-    CodeGenVisitor visitor{mCtx};
+    CodeGenVisitor visitor{mCtx, mOptimize};
 
     for (const auto& entry : modules)
     {
