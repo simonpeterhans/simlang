@@ -10,6 +10,7 @@ namespace simlang
 {
 
 class Scope;
+struct ConstStructValue;
 struct Identifier;
 struct InternedString;
 struct ParamNode;
@@ -173,6 +174,9 @@ struct NewObjectNode : ExpressionNode
 
     // The selected constructor (unused for lists/maps).
     Symbol* mConstructorSymbol = nullptr;
+
+    // Successful evaluation without constructor parameter bindings. Template clones start uncached.
+    const ConstStructValue* mConstValue = nullptr;
 };
 
 enum class LambdaCaptureKind : u8

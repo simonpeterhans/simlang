@@ -297,10 +297,11 @@ bool ConstDataLayoutVisitor::visitTypeDeclarationStatement(TypeDeclarationStatem
     {
         auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
         auto* constructor = static_cast<FunctionDeclarationStatementNode*>(type->mConstructorSymbol->mDeclNode);
-        if (constructor->mIsTrivialConstructor)
+        const ConstructorAnalysis* analysis = constructor->mConstructorAnalysis;
+        if (analysis->mIsTrivial)
         {
             // Register strings retained by the initialization plan, independently of folding its source expressions.
-            for (const FieldInitialization& field : constructor->mConstructorAnalysis->mFields)
+            for (const FieldInitialization& field : analysis->mFields)
             {
                 if (field.mConstantValue != nullptr)
                 {

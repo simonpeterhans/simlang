@@ -290,6 +290,15 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
         return false;
     }
 
+    // Reuse only closed constructions.
+    // Within a call frame, parameter values and recursion checks are per invocation.
+    bool isClosedEvaluation = mFrame == nullptr;
+    if (isClosedEvaluation && node->mConstValue != nullptr)
+    {
+        mValue = ConstValue::makeStruct(node->mConstValue);
+        return true;
+    }
+
     // Get the constructor analysis.
     auto* type = static_cast<AggregateType*>(node->mResolvedType);
     ConstructorAnalyzer analyzer{mAllocator};
@@ -355,6 +364,12 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     result->mType = type;
     result->mFields = {fields, analysis->mFields.size()};
     mValue = ConstValue::makeStruct(result);
+
+    // Cache successes only, a failed evaluation must retain its diagnostics and remain retryable.
+    if (isClosedEvaluation)
+    {
+        node->mConstValue = result;
+    }
 
     return true;
 }

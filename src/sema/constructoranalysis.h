@@ -24,6 +24,7 @@ struct ConstructorAnalysis
 {
     ArrayView<FieldInitialization> mFields;
     bool mIsConstEvaluable = false;
+    bool mIsTrivial = false;
 };
 
 class ConstructorAnalyzer

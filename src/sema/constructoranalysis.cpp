@@ -134,13 +134,14 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
         }
     }
 
-    // Set our stuff.
-    declaration->mIsTrivialConstructor = isTrivial && parameterIndex == declaration->mParams.size();
-    if (declaration->mIsTrivialConstructor || isConstEvaluable)
+    // Retain the field plan and both eligibility decisions in the analysis result.
+    isTrivial = isTrivial && parameterIndex == declaration->mParams.size();
+    if (isTrivial || isConstEvaluable)
     {
         result->mFields = makeArrayView(mAllocator, fields);
     }
     result->mIsConstEvaluable = isConstEvaluable;
+    result->mIsTrivial = isTrivial;
 
     return result;
 }

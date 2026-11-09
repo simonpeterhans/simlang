@@ -12,6 +12,7 @@
 #include "symbol/constvalue.h"
 #include "symbol/symbol.h"
 #include "type/types.h"
+#include "util/asserts.h"
 #include "util/bitutils.h"
 
 namespace simlang
@@ -51,7 +52,7 @@ bool CodeGenVisitor::emitNewMap(MapType* mapType)
     return true;
 }
 
-bool CodeGenVisitor::emitConstructorConstant(const ConstValue& value, Type* type)
+bool CodeGenVisitor::emitConstValue(const ConstValue& value, Type* type)
 {
     switch (value.mKind)
     {
@@ -59,7 +60,7 @@ bool CodeGenVisitor::emitConstructorConstant(const ConstValue& value, Type* type
         {
             for (const ConstFieldValue& field : value.as.mStruct->mFields)
             {
-                if (emitConstructorConstant(*field.mValue, field.mField->mType) == false)
+                if (emitConstValue(*field.mValue, field.mField->mType) == false)
                 {
                     return false;
                 }
@@ -94,14 +95,16 @@ bool CodeGenVisitor::emitConstructorConstant(const ConstValue& value, Type* type
                 }
                 default:
                 {
-                    break;
+                    SIMLANG_BREAK("Invalid primitive constant value during code generation.");
+                    return false;
                 }
             }
             break;
         }
         default:
         {
-            break;
+            SIMLANG_BREAK("Invalid constant value during code generation.");
+            return false;
         }
     }
 
@@ -115,7 +118,7 @@ bool CodeGenVisitor::emitTrivialConstructorFields(NewObjectNode* node, const Con
         if (field.mConstantValue != nullptr)
         {
             // If we have a const eval value, emit that.
-            if (emitConstructorConstant(*field.mConstantValue, field.mField->mType) == false)
+            if (emitConstValue(*field.mConstantValue, field.mField->mType) == false)
             {
                 return false;
             }
@@ -149,9 +152,10 @@ bool CodeGenVisitor::emitNewClass(NewObjectNode* node, AggregateType* classType)
 
     Symbol* constructorSymbol = node->mConstructorSymbol;
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructorSymbol->mDeclNode);
-    if (mOptimize && declaration->mIsTrivialConstructor)
+    const ConstructorAnalysis* analysis = declaration->mConstructorAnalysis;
+    if (mOptimize && analysis->mIsTrivial)
     {
-        if (emitTrivialConstructorFields(node, declaration->mConstructorAnalysis) == false)
+        if (emitTrivialConstructorFields(node, analysis) == false)
         {
             return false;
         }
@@ -177,10 +181,11 @@ bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structTyp
 {
     Symbol* constructor = node->mConstructorSymbol;
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructor->mDeclNode);
-    if (mOptimize && declaration->mIsTrivialConstructor)
+    const ConstructorAnalysis* analysis = declaration->mConstructorAnalysis;
+    if (mOptimize && analysis->mIsTrivial)
     {
         // If the constructor is trivial, we can directly push the member values.
-        return emitTrivialConstructorFields(node, declaration->mConstructorAnalysis);
+        return emitTrivialConstructorFields(node, analysis);
     }
 
     if (mOptimize && node->mFlags.test(cExprIsConstExpr))
@@ -189,7 +194,7 @@ bool CodeGenVisitor::emitNewStruct(NewObjectNode* node, AggregateType* structTyp
         ConstValue value;
         ConstEvalVisitor evaluator{mCtx.mAllocator};
         evaluator.evaluate(node, value);
-        return emitConstructorConstant(value, structType);
+        return emitConstValue(value, structType);
     }
 
     // Push zeroes and the stack address of the first word.

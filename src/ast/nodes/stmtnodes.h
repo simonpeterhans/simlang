@@ -144,9 +144,6 @@ struct FunctionDeclarationStatementNode : StatementNode
     {
     }
 
-    // Here for alignment reasons, set during const analysis.
-    bool mIsTrivialConstructor = false;
-
     bool mIsConstructor;
     SourceRange mIdentifierRange;
     Identifier* mIdentifier;

@@ -179,7 +179,7 @@ private:
     // Object construction.
     bool emitNewList(ListType* listType);
     bool emitNewMap(MapType* mapType);
-    bool emitConstructorConstant(const ConstValue& value, Type* type);
+    bool emitConstValue(const ConstValue& value, Type* type);
     bool emitTrivialConstructorFields(NewObjectNode* node, const ConstructorAnalysis* analysis);
     bool emitNewClass(NewObjectNode* node, AggregateType* classType);
     bool emitNewStruct(NewObjectNode* node, AggregateType* structType);
