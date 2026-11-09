@@ -213,6 +213,8 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
     s->mConstEvalState = ConstEvalState::cProcessing;
 
     auto* decl = static_cast<VariableDeclarationStatementNode*>(s->mDeclNode);
+    // Global initializers are independent of the constructor that requested their value.
+    ScopedValueBinder frameScope{mFrame, s->mSymbolType == SymbolType::cGlobalVariable ? nullptr : mFrame};
     // It's possible for mInit to be null if we have a multi-variable declaration.
     // We do not currently allow this to be const evaluable, and so we need to make sure that is correct.
     // (visit(nullptr) returns true, so visit(decl->mInit) is not enough.)
@@ -293,7 +295,7 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     ConstructorAnalyzer analyzer{mAllocator};
     const ConstructorAnalysis* analysis = analyzer.analyze(type, node->mConstructorSymbol);
 
-    // If it isn't const-evaluable, bail.
+    // Only constructors with a supported field-assignment body can be evaluated.
     if (analysis->mIsConstEvaluable == false)
     {
         return false;
@@ -319,10 +321,20 @@ bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
     // If they all are, we prepare for the constructor call.
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(node->mConstructorSymbol->mDeclNode);
 
+    // Recursive constructor bodies remain runtime work, nested argument expressions are already evaluated.
+    for (const CallFrame* frame = mFrame; frame != nullptr; frame = frame->mCaller)
+    {
+        if (frame->mConstructor == declaration)
+        {
+            return false;
+        }
+    }
+
     // Store the constructor declaration and its arguments and scope it.
     CallFrame frame{
         declaration,
-        {arguments.data(), arguments.size()}
+        {arguments.data(), arguments.size()},
+        mFrame
     };
     ScopedValueBinder<const CallFrame*> frameScope{mFrame, &frame};
 
@@ -442,9 +454,21 @@ bool ConstEvalVisitor::visitUnaryOp(UnaryOpNode* node)
 bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
 {
     ConstValue l;
-    ConstValue r;
+    if (evaluateValue(node->mLeft, l) == false)
+    {
+        return false;
+    }
 
-    if (evaluateValue(node->mLeft, l) == false || evaluateValue(node->mRight, r) == false)
+    // Logical operators evaluate their right operand only when it can affect the result.
+    // This is because we might short-circuit.
+    if ((node->mOp == BinaryOp::cAnd && l.as.mBool == false) || (node->mOp == BinaryOp::cOr && l.as.mBool))
+    {
+        mValue = l;
+        return true;
+    }
+
+    ConstValue r;
+    if (evaluateValue(node->mRight, r) == false)
     {
         return false;
     }

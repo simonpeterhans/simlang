@@ -19,11 +19,14 @@ public:
 
     bool visitCast(CastNode* node);
     bool visitNewObject(NewObjectNode* node);
+    bool visitLambda(LambdaNode* node);
     bool visitMemberAccess(MemberAccessNode* node);
     bool visitModuleAccess(ModuleAccessNode* node);
     bool visitBinaryOp(BinaryOpNode* node);
+    bool visitTernaryExpr(TernaryExprNode* node);
     bool visitAssignmentStatement(AssignmentStatementNode* node);
     bool visitVariableDeclarationStatement(VariableDeclarationStatementNode* node);
+    bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node);
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);
     bool visitSwitchStatement(SwitchStatementNode* node);
 

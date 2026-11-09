@@ -143,7 +143,7 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
                 return false;
             }
 
-            // For function pointers (and lambdas), we only allow function or syscall types as global const value.
+            // Constant callable values have no capture environment.
             Symbol* callable = value.as.mFunction;
             VMWord entryToken = cInvalidFunctionEntryToken;
             if (callable->mSymbolType == SymbolType::cFunction || callable->mSymbolType == SymbolType::cLambda)

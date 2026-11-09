@@ -40,6 +40,7 @@ public:
 
 private:
     void foldExpr(ExpressionNode*& e);
+    ExpressionNode* foldTernaryExpr(TernaryExprNode* node);
     ExpressionNode* makeLiteral(ExpressionNode* src, const ConstValue& cv) const;
 
     CompilerContext& mCtx;

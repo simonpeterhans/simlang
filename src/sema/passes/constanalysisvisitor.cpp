@@ -1,6 +1,7 @@
 #include "sema/passes/constanalysisvisitor.h"
 
 #include <unordered_set>
+#include <vector>
 
 #include "ast/assignmentop.h"
 #include "ast/binaryop.h"
@@ -19,6 +20,43 @@
 namespace simlang
 {
 
+namespace
+{
+
+class CallableBodyCollector : public ASTWalker<CallableBodyCollector>
+{
+public:
+    bool visitFunctionDeclarationStatement(FunctionDeclarationStatementNode* node)
+    {
+        mBodies.push_back(node->mBody);
+        return ASTWalker::visitFunctionDeclarationStatement(node);
+    }
+
+    bool visitLambda(LambdaNode* node)
+    {
+        mBodies.push_back(node->mBody);
+        return ASTWalker::visitLambda(node);
+    }
+
+    bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node)
+    {
+        // Only instantiated template bodies have been type checked.
+        if (node->isTemplate())
+        {
+            return true;
+        }
+
+        return ASTWalker::visitTypeDeclarationStatement(node);
+    }
+
+    const std::vector<StatementNode*>& getBodies() const { return mBodies; }
+
+private:
+    std::vector<StatementNode*> mBodies;
+};
+
+} // namespace
+
 ConstAnalysisVisitor::ConstAnalysisVisitor(CompilerContext& ctx)
     : mCtx(ctx)
 {
@@ -27,13 +65,27 @@ ConstAnalysisVisitor::ConstAnalysisVisitor(CompilerContext& ctx)
 bool ConstAnalysisVisitor::run(ASTNode* node)
 {
     DiagnosticCheckpoint checkpoint = mCtx.mDiag.createCheckpoint();
+
+    // Collect bodies independently of expression evaluation, with outer bodies before nested lambdas.
+    CallableBodyCollector collector;
+    collector.visit(node);
+
+    // Analyze module initializers and type declarations before the independent callable bodies.
+    // When encountering
     visit(node);
+
+    // Analyze all the bodies.
+    for (StatementNode* body : collector.getBodies())
+    {
+        visit(body);
+    }
+
     return mCtx.mDiag.hasNoErrorsSince(checkpoint);
 }
 
 void ConstAnalysisVisitor::leaveNode(ASTNode* node)
 {
-    // When we leave a node, finalize its constexpr status since our children must have been visited.
+    // When we leave a node, finalize its constexpr status after analyzing the relevant children.
     switch (node->mNodeType)
     {
         case NodeType::cIntLiteral:
@@ -82,25 +134,6 @@ void ConstAnalysisVisitor::leaveNode(ASTNode* node)
             // Module access is const expr if the rhs is.
             auto* access = static_cast<ModuleAccessNode*>(node);
             node->mFlags.set(cExprIsConstExpr, access->mRight->mFlags.test(cExprIsConstExpr));
-            break;
-        }
-        case NodeType::cTernaryExpr:
-        {
-            // A ternary is const expr if the condition and the subsequently selected expression is.
-            auto* ternary = static_cast<TernaryExprNode*>(node);
-            // Check the condition.
-            bool isConstExpr = ternary->mCondition->mFlags.test(cExprIsConstExpr);
-            if (isConstExpr)
-            {
-                // If it is, evaluate it so we know which branch is taken.
-                ConstValue condition;
-                ConstEvalVisitor evaluator{mCtx.mAllocator};
-                evaluator.evaluate(ternary->mCondition, condition);
-                // Once we know that, select and test that branch.
-                ExpressionNode* selected = condition.as.mBool ? ternary->mThenExpr : ternary->mElseExpr;
-                isConstExpr = selected->mFlags.test(cExprIsConstExpr);
-            }
-            node->mFlags.set(cExprIsConstExpr, isConstExpr);
             break;
         }
         default:
@@ -190,6 +223,12 @@ bool ConstAnalysisVisitor::visitNewObject(NewObjectNode* node)
     return true;
 }
 
+bool ConstAnalysisVisitor::visitLambda(LambdaNode*)
+{
+    // The function value is classified in leaveNode().
+    return true;
+}
+
 bool ConstAnalysisVisitor::visitMemberAccess(MemberAccessNode* node)
 {
     // Analyze the receiver.
@@ -260,7 +299,22 @@ bool ConstAnalysisVisitor::checkShiftCount(ExpressionNode* expr, std::string_vie
 bool ConstAnalysisVisitor::visitBinaryOp(BinaryOpNode* node)
 {
     // Visit our child nodes.
-    ASTWalker::visitBinaryOp(node);
+    visit(node->mLeft);
+
+    bool leftIsConstExpr = node->mLeft->mFlags.test(cExprIsConstExpr);
+    bool skipsRight = false;
+    if (leftIsConstExpr && (node->mOp == BinaryOp::cAnd || node->mOp == BinaryOp::cOr))
+    {
+        ConstValue left;
+        ConstEvalVisitor evaluator{mCtx.mAllocator};
+        evaluator.evaluate(node->mLeft, left);
+        skipsRight = left.as.mBool == (node->mOp == BinaryOp::cOr);
+    }
+
+    if (skipsRight == false)
+    {
+        visit(node->mRight);
+    }
 
     // Check the resolved nodes based on the op.
     bool valid = true;
@@ -273,10 +327,35 @@ bool ConstAnalysisVisitor::visitBinaryOp(BinaryOpNode* node)
         valid = checkShiftCount(node->mRight, binaryOpToString(node->mOp));
     }
 
-    // If the above and both lhs and rhs are const expr, set it.
+    // A short-circuited expression needs only the left value; otherwise both operands must be const expr.
     node->mFlags.set(cExprIsConstExpr,
-                     valid && node->mLeft->mFlags.test(cExprIsConstExpr) &&
-                         node->mRight->mFlags.test(cExprIsConstExpr));
+                     valid && leftIsConstExpr && (skipsRight || node->mRight->mFlags.test(cExprIsConstExpr)));
+    return true;
+}
+
+bool ConstAnalysisVisitor::visitTernaryExpr(TernaryExprNode* node)
+{
+    // A ternary is const expr if the condition and the subsequently selected expression is.
+    visit(node->mCondition);
+    bool isConstExpr = node->mCondition->mFlags.test(cExprIsConstExpr);
+    if (isConstExpr)
+    {
+        // If it is, evaluate it so we know which branch is taken.
+        ConstValue condition;
+        ConstEvalVisitor evaluator{mCtx.mAllocator};
+        evaluator.evaluate(node->mCondition, condition);
+
+        // Once we know that, select and test that branch.
+        ExpressionNode* selected = condition.as.mBool ? node->mThenExpr : node->mElseExpr;
+        visit(selected);
+        isConstExpr = selected->mFlags.test(cExprIsConstExpr);
+    }
+    else
+    {
+        visit(node->mThenExpr);
+        visit(node->mElseExpr);
+    }
+    node->mFlags.set(cExprIsConstExpr, isConstExpr);
     return true;
 }
 
@@ -332,6 +411,12 @@ bool ConstAnalysisVisitor::visitVariableDeclarationStatement(VariableDeclaration
         symbol->mConstEvalState = isConstExpr ? ConstEvalState::cReady : ConstEvalState::cFailed;
     }
 
+    return true;
+}
+
+bool ConstAnalysisVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStatementNode*)
+{
+    // Callable bodies are analyzed independently by run().
     return true;
 }
 

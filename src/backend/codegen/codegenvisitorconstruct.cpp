@@ -75,6 +75,11 @@ bool CodeGenVisitor::emitConstructorConstant(const ConstValue& value, Type* type
             }
             break;
         }
+        case ConstValueKind::cFunction:
+        {
+            emitCallableValue(value.as.mFunction);
+            break;
+        }
         case ConstValueKind::cPrimitive:
         {
             switch (value.mPrimitiveKind)

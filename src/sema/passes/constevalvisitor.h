@@ -59,6 +59,7 @@ private:
     {
         FunctionDeclarationStatementNode* mConstructor;
         ArrayView<const ConstValue> mArguments;
+        const CallFrame* mCaller;
     };
 
     ArenaAllocator& mAllocator;

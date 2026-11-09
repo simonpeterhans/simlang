@@ -166,6 +166,7 @@ private:
     MapAccessIdx getMapAccessIndex(MapType* mapType, FieldOffset valueFieldOffset, OpWordCount valueWords);
 
     // Call and interface emission.
+    void emitCallableValue(Symbol* symbol);
     bool emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType);
     bool emitMethodReceiver(MemberAccessNode* memberAccess);
     bool emitInterfaceMethodDispatch(MemberAccessNode* memberAccess, const FunctionType* funcType);

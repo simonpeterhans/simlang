@@ -18,128 +18,6 @@ ConstructorAnalyzer::ConstructorAnalyzer(ArenaAllocator& allocator)
 {
 }
 
-bool ConstructorAnalyzer::isConstEvaluableType(Type* type)
-{
-    // Primitives are always const-evaluable, and reference types can have constant null values.
-    if (type->mKind == TypeKind::cPrimitive || type->mKind == TypeKind::cClass || type->mKind == TypeKind::cList ||
-        type->mKind == TypeKind::cMap || type->mKind == TypeKind::cInterface)
-    {
-        return true;
-    }
-
-    // Other types must be recursively eligible structs.
-    if (type->mKind != TypeKind::cStruct)
-    {
-        return false;
-    }
-
-    // We're currently evaluating this struct, so mark it as false.
-    auto [it, inserted] = mTypes.emplace(type, false);
-    // If it was already in the map and was resolved at this point, we're good.
-    // If it was already in the map and wasn't resolved, we have a recursive struct, which is not allowed.
-    if (inserted == false)
-    {
-        return it->second;
-    }
-
-    // Go over all the members and check them.
-    auto* aggregate = static_cast<AggregateType*>(type);
-    for (Symbol* member : aggregate->mSymbol->mMembers)
-    {
-        if (member->mSymbolType == SymbolType::cMemberVariable && isConstEvaluableType(member->mType) == false)
-        {
-            return false;
-        }
-    }
-
-    // If we didn't bail earlier, mark the type as eligible.
-    mTypes[type] = true;
-
-    return true;
-}
-
-bool ConstructorAnalyzer::isConstEvaluableExpression(ExpressionNode* node)
-{
-    // Check whether the expression we're getting is const-evaluable.
-    switch (node->mNodeType)
-    {
-        case NodeType::cIntLiteral:
-        case NodeType::cFloatLiteral:
-        case NodeType::cBoolLiteral:
-        case NodeType::cStringLiteral:
-        case NodeType::cNullLiteral:
-        {
-            // Literals are always eligible.
-            return true;
-        }
-        case NodeType::cIdentifier:
-        {
-            // Parameters (always const), or globals/locals that are immutable are eligible.
-            Symbol* symbol = static_cast<IdentifierNode*>(node)->mSymbol;
-            return symbol->mSymbolType == SymbolType::cParameter ||
-                   ((symbol->mSymbolType == SymbolType::cGlobalVariable ||
-                     symbol->mSymbolType == SymbolType::cStackVariable) &&
-                    symbol->mFlags.test(SymbolFlags::cMutable) == false);
-        }
-        case NodeType::cModuleAccess:
-        {
-            // For module access, check the rhs for eligibility.
-            return isConstEvaluableExpression(static_cast<ModuleAccessNode*>(node)->mRight);
-        }
-        case NodeType::cMemberAccess:
-        {
-            // Struct members may be eligible.
-            auto* member = static_cast<MemberAccessNode*>(node);
-            return member->mReceiver->mResolvedType->mKind == TypeKind::cStruct &&
-                   isConstEvaluableExpression(member->mReceiver);
-        }
-        case NodeType::cNewObject:
-        {
-            auto* construction = static_cast<NewObjectNode*>(node);
-            if (construction->mResolvedType->mKind != TypeKind::cStruct)
-            {
-                return false;
-            }
-            for (const CallArgument& argument : construction->mArgs)
-            {
-                if (isConstEvaluableExpression(argument.mValue) == false)
-                {
-                    return false;
-                }
-            }
-
-            auto* type = static_cast<AggregateType*>(construction->mResolvedType);
-            return analyze(type, construction->mConstructorSymbol)->mIsConstEvaluable;
-        }
-        case NodeType::cImplicitCast:
-        case NodeType::cCast:
-        {
-            // Get the target expr to cast.
-            ExpressionNode* target = node->mNodeType == NodeType::cImplicitCast
-                                         ? static_cast<ImplicitCastNode*>(node)->mTarget
-                                         : static_cast<CastNode*>(node)->mTarget;
-            // The evaluator applies the type-checked conversion to each call's value.
-            return isConstEvaluableExpression(target);
-        }
-        case NodeType::cUnaryOp:
-        {
-            // Built-in unary operators use the evaluator's semantics.
-            auto* unary = static_cast<UnaryOpNode*>(node);
-            return isConstEvaluableExpression(unary->mExpr);
-        }
-        case NodeType::cBinaryOp:
-        {
-            // Checked operations may succeed or fail for different arguments to the same constructor.
-            auto* binary = static_cast<BinaryOpNode*>(node);
-            return isConstEvaluableExpression(binary->mLeft) && isConstEvaluableExpression(binary->mRight);
-        }
-        default:
-        {
-            return false;
-        }
-    }
-}
-
 const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Symbol* constructor)
 {
     auto* declaration = static_cast<FunctionDeclarationStatementNode*>(constructor->mDeclNode);
@@ -191,15 +69,14 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     bool isTrivial = true;
     usize parameterIndex = 0;
 
-    // Parameters and fields may contain primitives, null references, and nested value structs.
-    // Type composition is independent of the constructors used to create those values.
+    // Constant evaluation does not support borrowed arguments.
     if (isConstEvaluable)
     {
         for (const FunctionParam& param : functionType->mParamTypes)
         {
-            if (param.mIsInOut || isConstEvaluableType(param.mType) == false)
+            if (param.mIsInOut)
             {
-                // If any of them fail, the constructor is not const evaluable.
+                // Borrowed parameters cannot be bound to constant values.
                 isConstEvaluable = false;
                 break;
             }
@@ -207,7 +84,7 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
     }
 
     // Eligible constructors initialize every field in the proper order.
-    // Match the field order once, then check triviality and constexpr eligibility independently.
+    // Match the field order once, then retain the assignments for per-call constant evaluation.
     for (usize i = 0; i < fields.size(); ++i)
     {
         auto* assignment = static_cast<AssignmentStatementNode*>(body->mStatements[i]);
@@ -244,21 +121,12 @@ const ConstructorAnalysis* ConstructorAnalyzer::analyze(AggregateType* type, Sym
                 // Evaluate without parameter bindings so that the constant is independent of each call.
                 ConstValue value;
                 ConstEvalVisitor evaluator{mAllocator};
-                isTrivial = evaluator.evaluate(assignment->mRHS, value) &&
-                            (value.mKind == ConstValueKind::cPrimitive || value.mKind == ConstValueKind::cStruct ||
-                             value.mKind == ConstValueKind::cNull);
+                isTrivial = evaluator.evaluate(assignment->mRHS, value);
                 if (isTrivial)
                 {
                     fields[i].mConstantValue = mAllocator.create<ConstValue>(value);
                 }
             }
-        }
-
-        if (isConstEvaluable)
-        {
-            // If we're still const evaluable, check that the field type and expression are const evaluable as well.
-            isConstEvaluable =
-                isConstEvaluableType(fields[i].mField->mType) && isConstEvaluableExpression(assignment->mRHS);
         }
     }
 

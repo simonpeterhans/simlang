@@ -17,6 +17,25 @@
 namespace simlang
 {
 
+void CodeGenVisitor::emitCallableValue(Symbol* symbol)
+{
+    // A callable without captures has a null environment and a converted index as its entry token.
+    emitIntegerImmediate(cNullRef);
+
+    VMWord entryToken;
+    if (symbol->mSymbolType == SymbolType::cSyscall)
+    {
+        entryToken =
+            makeSyscallEntryToken(mCtx.mBackend.mFunctionInfos.size(), static_cast<SyscallIdx>(symbol->mIndex));
+    }
+    else
+    {
+        entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(symbol->mIndex));
+    }
+
+    emit<OpCode::cPush32>(entryToken);
+}
+
 bool CodeGenVisitor::emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType)
 {
     // Go over all the args.
