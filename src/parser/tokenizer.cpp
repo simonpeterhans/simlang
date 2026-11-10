@@ -658,7 +658,6 @@ TokenType Tokenizer::getIdentifierType() const
             INNER_SWITCH_END
         case 't':
             INNER_SWITCH(1)
-            case 'e': return CHECK(2, "template", TokenType::cTemplate);
             case 'h': return CHECK(2, "this", TokenType::cThis);
             case 'r': return CHECK(2, "true", TokenType::cBoolTrue);
             INNER_SWITCH_END

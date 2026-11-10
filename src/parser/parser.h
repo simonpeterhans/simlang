@@ -175,7 +175,6 @@ private:
     StatementNode* parseFunctionDeclaration();
     StatementNode* parseConstructorDeclaration();
     StatementNode* parseTypeDeclaration();
-    StatementNode* parseTemplateDeclaration();
     StatementNode* parseImportDeclaration();
     StatementNode* parseTopLevelDeclaration();
 

@@ -61,7 +61,7 @@ ParamNode* Parser::parseFunctionParameter()
 
 bool Parser::parseTemplateParameterList(std::vector<Identifier*>& params)
 {
-    // The list can be something like <T1, T2<T3>>.
+    // The list can be something like <T1, T2>.
     // We need to tell the tokenizer that we're in a different mode.
     // This is because we want to treat ">>" and ">>=" as '>' '>' ('='), since we're not expecting >> or >>= here.
     auto splitRightAnglesScope = mTokenizer.scopedSplitRightAngles(true);
@@ -350,6 +350,12 @@ StatementNode* Parser::parseTypeDeclaration()
         return nullptr;
     }
 
+    std::vector<Identifier*> params;
+    if (check(TokenType::cLT) && parseTemplateParameterList(params) == false)
+    {
+        return nullptr;
+    }
+
     if (getCurrentTokenType() == TokenType::cColon)
     {
         Token colonToken = consume();
@@ -403,51 +409,9 @@ StatementNode* Parser::parseTypeDeclaration()
                                                      nameToken.getRange(),
                                                      nameToken.mIdentifier,
                                                      membersView,
-                                                     ArrayView<Identifier*>{},
+                                                     makeArrayView(mCtx.mAllocator, params),
                                                      declarationKind,
                                                      makeArrayView(mCtx.mAllocator, declaredInterfaceSpecs));
-}
-
-StatementNode* Parser::parseTemplateDeclaration()
-{
-    // This is simply a type declaration preceded by something like:
-    // template<T1, T2<T3>>
-
-    // Consume the "template" token.
-    Token templateToken = consume();
-
-    // Parse the generic parameters.
-    std::vector<Identifier*> params;
-    params.reserve(4);
-
-    if (parseTemplateParameterList(params) == false)
-    {
-        return nullptr;
-    }
-
-    // Now this has to be followed by a type declaration keyword.
-    if (getCurrentTokenType() != TokenType::cStruct && getCurrentTokenType() != TokenType::cClass &&
-        getCurrentTokenType() != TokenType::cInterface)
-    {
-        mCtx.report<cUnexpectedToken>(getCurrentTokenRange(),
-                                      std::array{TokenType::cStruct, TokenType::cClass, TokenType::cInterface},
-                                      getCurrentTokenText());
-        return nullptr;
-    }
-
-    // Parse the type declaration as usual.
-    StatementNode* decl = parseTypeDeclaration();
-    if (decl == nullptr || decl->mNodeType != NodeType::cTypeDeclarationStatement)
-    {
-        return nullptr;
-    }
-
-    // Make the type declaration node and fill in the template params.
-    auto* typeDecl = static_cast<TypeDeclarationStatementNode*>(decl);
-    typeDecl->mTemplateParams = makeArrayView(mCtx.mAllocator, params);
-    typeDecl->mSourceRange = makeRange(templateToken, typeDecl);
-
-    return typeDecl;
 }
 
 StatementNode* Parser::parseTypeMember()
@@ -634,11 +598,6 @@ StatementNode* Parser::parseTopLevelDeclaration()
         case TokenType::cInterface:
         {
             result = parseTypeDeclaration();
-            break;
-        }
-        case TokenType::cTemplate:
-        {
-            result = parseTemplateDeclaration();
             break;
         }
         default:
