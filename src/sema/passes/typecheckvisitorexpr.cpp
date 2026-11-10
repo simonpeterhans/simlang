@@ -635,7 +635,15 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         Type* returnType = nullptr;
         std::vector<FunctionParam> params;
 
-        if (identifierEquals(node->mMember, "size"))
+        if (identifierEquals(node->mMember, "getKeys"))
+        {
+            returnType = mCtx.mTypes.getOrAddList(mapType->mKey);
+        }
+        else if (identifierEquals(node->mMember, "getValues"))
+        {
+            returnType = mCtx.mTypes.getOrAddList(mapType->mValue);
+        }
+        else if (identifierEquals(node->mMember, "size"))
         {
             returnType = intType;
         }

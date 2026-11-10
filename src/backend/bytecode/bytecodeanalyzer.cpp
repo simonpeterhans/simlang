@@ -352,6 +352,8 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         case OpCode::cLoadObjField:
         case OpCode::cListSize:
         case OpCode::cListIsEmpty:
+        case OpCode::cMapGetKeys:
+        case OpCode::cMapGetValues:
         case OpCode::cMapSize:
         case OpCode::cMapIsEmpty:
         case OpCode::cI2F:

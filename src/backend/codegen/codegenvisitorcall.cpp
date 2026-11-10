@@ -262,6 +262,28 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
     auto* mapType = static_cast<MapType*>(memberAccess->mReceiver->mResolvedType);
     u32 valueWords = layout::getWordSizeForType(mapType->mValue);
 
+    if (identifierEquals(memberAccess->mMember, "getKeys"))
+    {
+        if (visit(memberAccess->mReceiver) == false)
+        {
+            return false;
+        }
+
+        emit<OpCode::cMapGetKeys>();
+        return true;
+    }
+
+    if (identifierEquals(memberAccess->mMember, "getValues"))
+    {
+        if (visit(memberAccess->mReceiver) == false)
+        {
+            return false;
+        }
+
+        emit<OpCode::cMapGetValues>();
+        return true;
+    }
+
     if (identifierEquals(memberAccess->mMember, "size"))
     {
         if (visit(memberAccess->mReceiver) == false)

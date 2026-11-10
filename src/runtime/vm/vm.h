@@ -160,6 +160,7 @@ private:
                       VMAddress address,
                       u32& outIndex,
                       bool& outFound);
+    VMWord makeMapSnapshot(VMWord handle, bool keys, VMAddress address);
 
     // Map operations used by syscalls.
     bool getMapSize(VMWord handle, u32& outSize);

@@ -93,6 +93,8 @@ X( ListContains,          1,    OpWordCount,      mSize,        void,           
 X( ListClear,             0,    void,             _1,           void,            _2 )
 X( ListReserve,           0,    void,             _1,           void,            _2 )
 
+X( MapGetKeys,            0,    void,             _1,           void,            _2 )
+X( MapGetValues,          0,    void,             _1,           void,            _2 )
 X( MapSize,               0,    void,             _1,           void,            _2 )
 X( MapIsEmpty,            0,    void,             _1,           void,            _2 )
 X( MapClear,              0,    void,             _1,           void,            _2 )

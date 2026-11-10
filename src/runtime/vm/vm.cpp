@@ -924,6 +924,51 @@ bool VM::findMapEntry(const MapBlock& block,
         outFound);
 }
 
+VMWord VM::makeMapSnapshot(VMWord handle, bool keys, VMAddress address)
+{
+    // Get the map.
+    MapBlock block;
+    if (getCheckedMapBlock(handle, block, address) == false)
+    {
+        return cNullRef;
+    }
+
+    u32 length = block.mHeader->mLength;
+    TypeID elementTypeID = keys ? block.getKeyTypeID() : block.getValueTypeID();
+    u32 elementWords = keys ? block.getKeyWords() : block.getValueWords();
+
+    // Make a new list.
+    Heap::ListAlloc alloc = mHeap.allocateList(elementTypeID, elementWords, length, *this);
+    if (alloc.mRef == cNullRef)
+    {
+        reportRuntimeError(address,
+                           RuntimeErrorKind::cAllocationFailed,
+                           toRuntimeErrorByteCount(static_cast<u64>(length) * elementWords));
+        return cNullRef;
+    }
+
+    // Refresh the map block in case list had to allocate.
+    if (getCheckedMapBlock(handle, block, address) == false)
+    {
+        return cNullRef;
+    }
+
+    // Copy the words for each key or value into the allocated block.
+    u32 outputIndex = 0;
+    block.forEachOccupiedBucket(
+        [&](u32 index, const VMWord*)
+        {
+            const VMWord* src = keys ? block.getKey(index) : block.getValue(index);
+            VMWord* dst = alloc.mBlock.getElement(outputIndex);
+            copyWords(dst, src, elementWords);
+            ++outputIndex;
+        });
+
+    alloc.mBlock.mHeader->mLength = length;
+
+    return alloc.mRef;
+}
+
 bool VM::getMapSize(VMWord handle, u32& outSize)
 {
     MapBlock block;
@@ -3471,6 +3516,26 @@ bool VM::run()
         sp -= 2;
 
         VM_END_OP();
+    }
+    VM_OP(MapGetKeys)
+    {
+        // Code:  MapGetKeys()
+        // Stack: [map, ...] -> [list, ...]
+        // We may run GC when we're making the snapshot, so sync the stack.
+        STACK_SYNC();
+        // Create a new list from the map stuff and push that.
+        sp[-1] = makeMapSnapshot(sp[-1], true, getRuntimeErrorAddress(pc, code));
+        VM_END_OP_CHECKED();
+    }
+    VM_OP(MapGetValues)
+    {
+        // Code:  MapGetValues()
+        // Stack: [map, ...] -> [list, ...]
+        // We may run GC when we're making the snapshot, so sync the stack.
+        STACK_SYNC();
+        // Create a new list from the map stuff and push that.
+        sp[-1] = makeMapSnapshot(sp[-1], false, getRuntimeErrorAddress(pc, code));
+        VM_END_OP_CHECKED();
     }
     VM_OP(MapSize)
     {
