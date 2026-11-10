@@ -1,5 +1,4 @@
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 
 #include "ast/exprutils.h"
@@ -10,10 +9,8 @@
 #include "ast/nodes/typespecifiernodes.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
 #include "sema/passes/typecheckvisitor.h"
 #include "source/sourcerange.h"
-#include "symbol/constvalue.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
 #include "type/typeformat.h"
@@ -193,13 +190,6 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
     // Check whether our own type is implicit or explicit.
     if (node->mTypeSpec == nullptr)
     {
-        if (initType == nullptr)
-        {
-            mCtx.report<cCannotInferType>(node->mIdentifierRange, node->mIdentifier);
-            node->mSymbol->mType = getErrorType();
-            return true;
-        }
-
         // Null cannot be implicit.
         if (initType->mKind == TypeKind::cNull)
         {
@@ -233,36 +223,11 @@ bool TypeCheckVisitor::visitVariableDeclarationStatement(VariableDeclarationStat
         node->mSymbol->mType = declaredType;
     }
 
-    // Const checks, currently we only allow primitives.
-    bool isConstDeclaration = (s->mFlags.test(SymbolFlags::cMutable) == false);
-    bool hasValidConstType = true;
-
-    // If we have one, make sure the type is valid.
-    if (isConstDeclaration && isMissingOrErrorType(s->mType) == false)
+    // Const declarations are restricted to scalar and string types.
+    if (s->mFlags.test(SymbolFlags::cMutable) == false && isMissingOrErrorType(s->mType) == false &&
+        isValidConstType(s->mType) == false)
     {
-        hasValidConstType = isValidConstType(s->mType);
-        if (hasValidConstType == false)
-        {
-            mCtx.report<cInvalidConstType>(node->mIdentifierRange, typeToString(s->mType));
-        }
-    }
-
-    bool hasConstExprInit = node->mInit != nullptr && node->mInit->mFlags.test(cExprIsConstExpr);
-
-    // Global stuff needs a const expr initializer.
-    if (s->mSymbolType == SymbolType::cGlobalVariable && node->mInit != nullptr && hasValidResolvedType(node->mInit) &&
-        hasConstExprInit == false)
-    {
-        mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
-    }
-
-    // If the variable is const and the expression is const expr, mark the variable as such.
-    if (isConstDeclaration && hasValidConstType &&
-        (s->mSymbolType == SymbolType::cGlobalVariable || s->mSymbolType == SymbolType::cStackVariable ||
-         s->mSymbolType == SymbolType::cParameter) &&
-        hasConstExprInit)
-    {
-        s->mFlags.set(SymbolFlags::cConstExpr, true);
+        mCtx.report<cInvalidConstType>(node->mIdentifierRange, typeToString(s->mType));
     }
 
     return true;
@@ -341,8 +306,6 @@ bool TypeCheckVisitor::visitLambda(LambdaNode* node)
     node->mResolvedType = node->mSymbol->mType;
     // If we are in a method, also register the type of the object so "this" can easily be typed.
     node->mLexicalThisType = mCurrentTypeSymbol == nullptr ? nullptr : mCurrentTypeSymbol->mType;
-    // If we have no captures, this can be constexpr.
-    node->mFlags.set(cExprIsConstExpr, node->mCaptures.empty());
 
     // Create all the scopes before processing the body.
     ScopedValueBinder returnTypeScope{mCurrentReturnType, returnType};
@@ -666,7 +629,6 @@ bool TypeCheckVisitor::visitSwitchStatement(SwitchStatementNode* node)
     // Enter a new context where we can break out of.
     auto breakScope = enterBreakContext();
 
-    std::unordered_set<i32> cases;
     bool hasDefault = false;
 
     for (SwitchSectionStatementNode* section : node->mSections)
@@ -697,27 +659,6 @@ bool TypeCheckVisitor::visitSwitchStatement(SwitchStatementNode* node)
                     mCtx.report<cTypeMismatch>(section->mCaseExpression->mSourceRange,
                                                typeToString(intType),
                                                typeToString(section->mCaseExpression->mResolvedType));
-                }
-                else
-                {
-                    ConstValue cv{};
-                    ConstEvalVisitor cev{mCtx.mAllocator};
-
-                    if (cev.evaluate(section->mCaseExpression, cv) == false ||
-                        cv.mPrimitiveKind != PrimitiveTypeKind::cInt)
-                    {
-                        // It also has to be constexpr (and the constexpr value has to be int).
-                        mCtx.report<cCaseLabelNotConstexpr>(section->mCaseExpression->mSourceRange);
-                    }
-                    else if (cases.insert(cv.as.mInteger).second == false)
-                    {
-                        // It also cannot exist already.
-                        mCtx.report<cDuplicateCaseLabel>(section->mCaseExpression->mSourceRange, cv.as.mInteger);
-                    }
-                    else
-                    {
-                        section->mCaseValue = cv.as.mInteger;
-                    }
                 }
             }
         }

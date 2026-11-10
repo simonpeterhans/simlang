@@ -1,4 +1,3 @@
-#include <utility>
 #include <vector>
 
 #include "ast/assignmentop.h"
@@ -13,7 +12,6 @@
 #include "backend/layout/layout.h"
 #include "backend/typeidutils.h"
 #include "driver/compilercontext.h"
-#include "runtime/callinfo.h"
 #include "runtime/op/opcode.h"
 #include "runtime/vmdefines.h"
 #include "symbol/symbol.h"
@@ -220,50 +218,6 @@ bool CodeGenVisitor::visitFunctionDeclarationStatement(FunctionDeclarationStatem
 
     // Also set the function info for this scope so we properly set the data for it (args, locals, etc).
     ScopedValueBinder functionInfoScope{mCurrentFunctionInfo, &mCtx.mBackend.mFunctionInfos[funIndex]};
-
-    if (node->mIsInitMethod)
-    {
-        // If this is an initializer, we might have to emit some default initializers.
-        const AggregateLayout* layout = mCurrentAggregateType->mLayout;
-        for (const FieldLayout& field : layout->mFields)
-        {
-            Symbol* fieldSymbol = field.mSymbol;
-
-            // If the field has no initializer, skip.
-            auto* decl = static_cast<VariableDeclarationStatementNode*>(fieldSymbol->mDeclNode);
-            if (decl->mInit == nullptr)
-            {
-                continue;
-            }
-
-            // If the field is explicitly assigned in the initializer (constructor) already, bail.
-            // (These are all member assignment statements before the first non-assignment statement.)
-            bool isExplicitlyAssigned = false;
-            for (Symbol* assignedField : node->mInitializerAssignedFields)
-            {
-                if (assignedField == fieldSymbol)
-                {
-                    isExplicitlyAssigned = true;
-                    break;
-                }
-            }
-
-            if (isExplicitlyAssigned)
-            {
-                continue;
-            }
-
-            // Otherwise, load "this" at the offset the field is.
-            emit<OpCode::cLoadLocal>(static_cast<LocalIdx>(0));
-            emitFieldReference(field.mOffset);
-
-            // Then, emit the initializer of the variable declaration.
-            if (emitInto(decl->mInit, Place::makeAddressOnStackPlace(fieldSymbol->mType)) == false)
-            {
-                return false;
-            }
-        }
-    }
 
     // Emit the function body.
     if (visit(node->mBody) == false)

@@ -7,10 +7,8 @@
 #include "ast/unaryop.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
 #include "sema/passes/typecheckvisitor.h"
 #include "source/sourcerange.h"
-#include "symbol/constvalue.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
 #include "type/typeformat.h"
@@ -23,8 +21,6 @@
 
 namespace simlang
 {
-
-class ArenaAllocator;
 
 static bool canAssignNull(Type* type)
 {
@@ -41,35 +37,6 @@ static bool canAssignNull(Type* type)
 static bool isNumericPrimitive(PrimitiveTypeKind kind)
 {
     return kind == PrimitiveTypeKind::cInt || kind == PrimitiveTypeKind::cFloat;
-}
-
-static bool isConstExprZero(ExpressionNode* expr, ArenaAllocator& allocator)
-{
-    // Check for constexpr (duh).
-    if (expr->mFlags.test(cExprIsConstExpr) == false)
-    {
-        return false;
-    }
-
-    // Evaluate it and check what we got.
-    ConstValue value;
-    ConstEvalVisitor evaluator{allocator};
-    if (evaluator.evaluate(expr, value) == false || value.mKind != ConstValueKind::cPrimitive)
-    {
-        return false;
-    }
-
-    if (value.mPrimitiveKind == PrimitiveTypeKind::cInt)
-    {
-        return value.as.mInteger == 0;
-    }
-
-    if (value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
-    {
-        return value.as.mFloat == 0.0f;
-    }
-
-    return false;
 }
 
 bool TypeCheckVisitor::allowImplicitCast(Type* fromType, Type* toType)
@@ -169,11 +136,8 @@ bool TypeCheckVisitor::allowExplicitCast(Type* fromType, Type* toType)
 
 ImplicitCastNode* TypeCheckVisitor::createImplicitCast(ExpressionNode* node, Type* targetType) const
 {
-    bool isConstExpr = node->mFlags.test(cExprIsConstExpr);
-
     auto* castNode = mCtx.allocate<ImplicitCastNode>(node->mSourceRange, node);
     castNode->mResolvedType = targetType;
-    castNode->mFlags.set(cExprIsConstExpr, isConstExpr);
 
     return castNode;
 }
@@ -231,7 +195,7 @@ bool TypeCheckVisitor::convertArgumentToParameterType(ExpressionNode*& expr, Typ
     return false;
 }
 
-Symbol* TypeCheckVisitor::getInitializerAssignedField(ExpressionNode* lhs) const
+Symbol* TypeCheckVisitor::getConstructorAssignedField(ExpressionNode* lhs) const
 {
     // This has to be a member access node.
     if (lhs->mNodeType != NodeType::cMemberAccess)
@@ -256,17 +220,17 @@ Symbol* TypeCheckVisitor::getInitializerAssignedField(ExpressionNode* lhs) const
     return symbol;
 }
 
-bool TypeCheckVisitor::isInitializerFieldAssignment(AssignmentStatementNode* node) const
+bool TypeCheckVisitor::isConstructorFieldAssignment(AssignmentStatementNode* node) const
 {
-    // Here, we want to find out if an assignment statement comes before the first non-assignment in an initializer.
-    // If we have no function or we are not in an initializer, bail.
-    if (mCurrentFunction == nullptr || mCurrentFunction->mIsInitMethod == false)
+    // Here, we want to find out if an assignment statement comes before the first non-assignment in a constructor.
+    // If we have no function or we are not in a constructor, bail.
+    if (mCurrentFunction == nullptr || mCurrentFunction->mIsConstructor == false)
     {
         return false;
     }
 
     // Get the symbol we're assigning to.
-    Symbol* assignedField = getInitializerAssignedField(node->mLHS);
+    Symbol* assignedField = getConstructorAssignedField(node->mLHS);
     if (assignedField == nullptr)
     {
         return false;
@@ -290,7 +254,7 @@ bool TypeCheckVisitor::isInitializerFieldAssignment(AssignmentStatementNode* nod
         // Otherwise, make sure it's a '=' assignment and it assigns to a member.
         auto* leadingAssignment = static_cast<AssignmentStatementNode*>(stmt);
         if (leadingAssignment->mOp != AssignmentOp::cAss ||
-            getInitializerAssignedField(leadingAssignment->mLHS) == nullptr)
+            getConstructorAssignedField(leadingAssignment->mLHS) == nullptr)
         {
             return false;
         }
@@ -467,12 +431,6 @@ void TypeCheckVisitor::resolveBinaryMathOps(BinaryOpNode* node)
         markError(node);
         return;
     }
-
-    if ((node->mOp == BinaryOp::cDiv || node->mOp == BinaryOp::cMod) && isConstExprZero(node->mRight, mCtx.mAllocator))
-    {
-        mCtx.report<cDivisionByZero>(node->mRight->mSourceRange, binaryOpToString(node->mOp));
-        markError(node);
-    }
 }
 
 void TypeCheckVisitor::resolveBinaryEqualityOps(BinaryOpNode* node)
@@ -595,20 +553,6 @@ void TypeCheckVisitor::resolveBinaryBitOps(BinaryOpNode* node) const
         return;
     }
 
-    // Make sure << and >> are within bounds if we have a constexpr.
-    if (node->mOp == BinaryOp::cShiftL || node->mOp == BinaryOp::cShiftR)
-    {
-        ConstValue shiftCount;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        if (rhs->mFlags.test(cExprIsConstExpr) && evaluator.evaluate(rhs, shiftCount) &&
-            (shiftCount.as.mInteger < 0 || shiftCount.as.mInteger >= 32))
-        {
-            mCtx.report<cShiftCountOutOfRange>(rhs->mSourceRange, binaryOpToString(node->mOp), shiftCount.as.mInteger);
-            markError(node);
-            return;
-        }
-    }
-
     // If we got here, both are ints and so is the result.
     node->mResolvedType = lhs->mResolvedType;
 }
@@ -668,10 +612,6 @@ bool TypeCheckVisitor::visitUnaryOp(UnaryOpNode* node)
             return true;
         }
     }
-
-    // Constexpr check.
-    bool isConstExpr = node->mExpr->mFlags.test(cExprIsConstExpr);
-    node->mFlags.set(cExprIsConstExpr, isConstExpr);
 
     return true;
 }
@@ -742,15 +682,6 @@ bool TypeCheckVisitor::visitBinaryOp(BinaryOpNode* node)
             return true;
         }
     }
-
-    if (hasValidResolvedType(node) == false)
-    {
-        return true;
-    }
-
-    bool lhsConst = node->mLeft->mFlags.test(cExprIsConstExpr);
-    bool rhsConst = node->mRight->mFlags.test(cExprIsConstExpr);
-    node->mFlags.set(cExprIsConstExpr, lhsConst && rhsConst);
 
     return true;
 }
@@ -850,10 +781,6 @@ bool TypeCheckVisitor::visitTernaryExpr(TernaryExprNode* node)
         return true;
     }
 
-    ConstEvalVisitor cev{mCtx.mAllocator};
-    ConstValue cv;
-    node->mFlags.set(cExprIsConstExpr, cev.evaluate(node, cv));
-
     return true;
 }
 
@@ -870,11 +797,11 @@ bool TypeCheckVisitor::visitAssignmentStatement(AssignmentStatementNode* node)
         return true;
     }
 
-    // We allow const values to be assigned to in the initializer.
+    // We allow const fields to be assigned to in the constructor.
     // But (for now) only, if they appear before the first non-assignment statement.
-    // We allow immutability only if it is one an initializer assignment.
-    bool allowInitializerFieldAssignment = isInitializerFieldAssignment(node);
-    if (requireAssignableLValue(node->mLHS, allowInitializerFieldAssignment) == false)
+    // Allow assignments to immutable fields only in the constructor's leading field assignments.
+    bool allowConstructorFieldAssignment = isConstructorFieldAssignment(node);
+    if (requireAssignableLValue(node->mLHS, allowConstructorFieldAssignment) == false)
     {
         return true;
     }
@@ -926,12 +853,6 @@ bool TypeCheckVisitor::visitAssignmentStatement(AssignmentStatementNode* node)
         {
             if (isNumericPrimitive(lhsPTK) && isNumericPrimitive(rhsPTK))
             {
-                if ((node->mOp == AssignmentOp::cAssDiv || node->mOp == AssignmentOp::cAssMod) &&
-                    isConstExprZero(node->mRHS, mCtx.mAllocator))
-                {
-                    mCtx.report<cDivisionByZero>(node->mRHS->mSourceRange, assignmentOpToString(node->mOp));
-                }
-
                 return true;
             }
             break;
@@ -945,22 +866,6 @@ bool TypeCheckVisitor::visitAssignmentStatement(AssignmentStatementNode* node)
             if (lhsPTK != PrimitiveTypeKind::cInt || rhsPTK != PrimitiveTypeKind::cInt)
             {
                 break;
-            }
-
-            // If we have a shift, check whether we can (in)validate it at compile time.
-            if ((node->mOp == AssignmentOp::cAssShl || node->mOp == AssignmentOp::cAssShr) &&
-                node->mRHS->mFlags.test(cExprIsConstExpr))
-            {
-                ConstValue shiftCount;
-                ConstEvalVisitor evaluator{mCtx.mAllocator};
-
-                if (evaluator.evaluate(node->mRHS, shiftCount) &&
-                    (shiftCount.as.mInteger < 0 || shiftCount.as.mInteger >= 32))
-                {
-                    mCtx.report<cShiftCountOutOfRange>(node->mRHS->mSourceRange,
-                                                       assignmentOpToString(node->mOp),
-                                                       shiftCount.as.mInteger);
-                }
             }
 
             return true;

@@ -912,9 +912,7 @@ ExpressionNode* Parser::parseParen()
 
 ExpressionNode* Parser::parseNew()
 {
-    // new Type()
-    // new Type(arg0, arg1)
-    // new Type(field: value)
+    // new Type(arg0, arg1, ...)
 
     // Consume the "new".
     Token newToken = consume();
@@ -932,24 +930,20 @@ ExpressionNode* Parser::parseNew()
         return nullptr;
     }
 
-    // Parse the args and the ')'.
+    // Parse the argument list.
     std::vector<CallArgument> args;
-    std::vector<FieldInitializer*> fields;
-    if (parseArgumentList(args, &fields) == false)
+    if (parseArgumentList(args) == false)
     {
         return nullptr;
     }
 
-    return mCtx.create<NewObjectNode>(makeRangeToPrevious(newToken),
-                                      typeSpec,
-                                      makeArrayView(mCtx.mAllocator, fields),
-                                      makeArrayView(mCtx.mAllocator, args));
+    ArrayView<CallArgument> argsView = makeArrayView(mCtx.mAllocator, args);
+    return mCtx.create<NewObjectNode>(makeRangeToPrevious(newToken), typeSpec, argsView);
 }
 
-bool Parser::parseArgumentList(std::vector<CallArgument>& args, std::vector<FieldInitializer*>* fields)
+bool Parser::parseArgumentList(std::vector<CallArgument>& args)
 {
-    // a0, a1, ...)
-    // a0 : e0, a1 : e1, ...)
+    // e0, e1, ...)
 
     // We came here from a '(', if we have a ')' we're already done.
     if (check(TokenType::cRightParen))
@@ -970,7 +964,6 @@ bool Parser::parseArgumentList(std::vector<CallArgument>& args, std::vector<Fiel
         }
 
         // Parse the expression.
-        Token argumentToken = getCurrentToken();
         ExpressionNode* arg = parseExpression();
         if (arg == nullptr)
         {
@@ -979,57 +972,8 @@ bool Parser::parseArgumentList(std::vector<CallArgument>& args, std::vector<Fiel
 
         // If we have an inout token, include the inout in the range, otherwise use the range.
         SourceRange argumentRange = isInOutArgument ? inOutToken.makeRangeTo(arg->mSourceRange) : arg->mSourceRange;
-
-        // Check if this is a positional argument or an initializer.
-        if (fields != nullptr && check(TokenType::cColon))
-        {
-            // If we have any positional arguments already, we don't allow field initializers.
-            if (args.empty() == false)
-            {
-                mCtx.report<cMixedConstructionArguments>(argumentRange);
-                return false;
-            }
-
-            // Don't allow inout arguments for fields either.
-            if (isInOutArgument)
-            {
-                mCtx.report<cUnexpectedInOutArgument>(argumentRange, fields->size() + 1);
-                return false;
-            }
-
-            // Expect an identifier.
-            if (argumentToken.mType != TokenType::cIdentifier || arg->mNodeType != NodeType::cIdentifier)
-            {
-                mCtx.report<cUnexpectedToken>(argumentRange, "field name", "expression");
-                return false;
-            }
-
-            // Consume the ':'.
-            consume();
-
-            // Parse the expression.
-            ExpressionNode* value = parseExpression();
-            if (value == nullptr)
-            {
-                return false;
-            }
-
-            fields->push_back(mCtx.create<FieldInitializer>(argumentToken.makeRangeTo(value->mSourceRange),
-                                                            argumentToken.getRange(),
-                                                            argumentToken.mIdentifier,
-                                                            value));
-        }
-        else
-        {
-            // If we have any field initializers already, we don't allow positional arguments.
-            if (fields != nullptr && fields->empty() == false)
-            {
-                mCtx.report<cMixedConstructionArguments>(argumentRange);
-                return false;
-            }
-
-            args.push_back(CallArgument{argumentRange, arg, isInOutArgument});
-        }
+        CallArgument callArg = CallArgument{argumentRange, arg, isInOutArgument};
+        args.push_back(callArg);
 
         // Check whether to expect more args.
         if (check(TokenType::cComma))

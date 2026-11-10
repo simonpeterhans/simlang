@@ -6,6 +6,7 @@
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/stmtnodes.h"
 #include "backend/backendstate.h"
+#include "backend/layout/layout.h"
 #include "backend/stringdata.h"
 #include "backend/typeidutils.h"
 #include "diag/diagnosticmanager.h"
@@ -13,7 +14,8 @@
 #include "driver/compilercontext.h"
 #include "runtime/stringdata.h"
 #include "runtime/vmdefines.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constructoranalysis.h"
+#include "sema/constevaluator.h"
 #include "source/sourcerange.h"
 #include "symbol/constvalue.h"
 #include "symbol/internedstring.h"
@@ -44,6 +46,23 @@ bool ConstDataLayoutVisitor::run(ASTNode* node)
 StringLiteralIdx ConstDataLayoutVisitor::addStringLiteral(const InternedString* str)
 {
     return mCtx.mBackend.mStrings.getOrAddLiteral(str);
+}
+
+void ConstDataLayoutVisitor::registerConstValueStrings(const ConstValue& value)
+{
+    if (value.mKind == ConstValueKind::cStruct)
+    {
+        // If we have a struct, recurse.
+        for (const ConstFieldValue& field : value.as.mStruct->mFields)
+        {
+            registerConstValueStrings(*field.mValue);
+        }
+    }
+    else if (value.mKind == ConstValueKind::cPrimitive && value.mPrimitiveKind == PrimitiveTypeKind::cString)
+    {
+        // If we have a literal, add that.
+        addStringLiteral(value.as.mString);
+    }
 }
 
 bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, const ConstValue& value)
@@ -124,7 +143,7 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
                 return false;
             }
 
-            // For function pointers (and lambdas), we only allow function or syscall types as global const value.
+            // Constant callable values have no capture environment.
             Symbol* callable = value.as.mFunction;
             VMWord entryToken = cInvalidFunctionEntryToken;
             if (callable->mSymbolType == SymbolType::cFunction || callable->mSymbolType == SymbolType::cLambda)
@@ -160,7 +179,11 @@ bool ConstDataLayoutVisitor::writeConstGlobalValue(Type* type, u32 globalIdx, co
                 return false;
             }
 
-            mCtx.mBackend.mInitialGlobals[globalIdx] = cNullRef;
+            // Write the whole null value, including the dispatch word for interfaces.
+            for (u32 i = 0; i < layout::getWordSizeForType(type); ++i)
+            {
+                mCtx.mBackend.mInitialGlobals[globalIdx + i] = cNullRef;
+            }
             return true;
         }
         default:
@@ -177,15 +200,9 @@ bool ConstDataLayoutVisitor::writeConstGlobalInitializer(VariableDeclarationStat
     SIMLANG_ASSERTM(node->mInit->mFlags.test(cExprIsConstExpr),
                     "Global initializer is not constexpr after semantic analysis.");
 
-    // We have to evaluate again here for structs.
-    // This is less efficient than what it could be, but that's okay for now.
+    // Constant analysis has already validated this initializer.
     ConstValue value;
-    ConstEvalVisitor evaluator{mCtx.mAllocator};
-    if (evaluator.evaluate(node->mInit, value) == false)
-    {
-        mCtx.report<cGlobalInitializerNotConstExpr>(node->mInit->mSourceRange, node->mIdentifier);
-        return false;
-    }
+    mCtx.mConstEvaluator.evaluate(node->mInit, value);
 
     Symbol* symbol = node->mSymbol;
     return writeConstGlobalValue(symbol->mType, static_cast<u32>(symbol->mIndex), value);
@@ -195,7 +212,7 @@ bool ConstDataLayoutVisitor::visitIdentifier(IdentifierNode* node)
 {
     // If this is not constexpr, we can't do anything with it.
     Symbol* symbol = node->mSymbol;
-    if (symbol->mFlags.test(SymbolFlags::cConstExpr) == false)
+    if (symbol->mConstEvalState != ConstEvalState::cReady)
     {
         return true;
     }
@@ -252,12 +269,44 @@ bool ConstDataLayoutVisitor::visitFormatString(FormatStringNode* node)
     return true;
 }
 
+bool ConstDataLayoutVisitor::visitNewObject(NewObjectNode* node)
+{
+    // If we have a new expression that is a const expr, evaluate it and emit the strings.
+    // (They are the only thing we need to lay out here.)
+    if (node->mFlags.test(cExprIsConstExpr))
+    {
+        ConstValue value;
+        mCtx.mConstEvaluator.evaluate(node, value);
+        registerConstValueStrings(value);
+    }
+
+    return ASTWalker::visitNewObject(node);
+}
+
 bool ConstDataLayoutVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNode* node)
 {
     // If this type is a template declaration, ignore it -- we only process instantiated templates.
     if (node->isTemplate())
     {
         return true;
+    }
+
+    if (node->isInterface() == false)
+    {
+        auto* type = static_cast<AggregateType*>(node->mSymbol->mType);
+        auto* constructor = static_cast<FunctionDeclarationStatementNode*>(type->mConstructorSymbol->mDeclNode);
+        const ConstructorAnalysis* analysis = constructor->mConstructorAnalysis;
+        if (analysis->mIsTrivial)
+        {
+            // Register strings retained by the initialization plan, independently of folding its source expressions.
+            for (const FieldInitialization& field : analysis->mFields)
+            {
+                if (field.mConstantValue != nullptr)
+                {
+                    registerConstValueStrings(*field.mConstantValue);
+                }
+            }
+        }
     }
 
     return ASTWalker::visitTypeDeclarationStatement(node);

@@ -8,10 +8,8 @@
 #include "diag/diagnosticmanager.h"
 #include "diag/diagnostictype.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
 #include "sema/passes/typecheckvisitor.h"
 #include "source/sourcerange.h"
-#include "symbol/constvalue.h"
 #include "symbol/identifier.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
@@ -20,10 +18,8 @@
 #include "type/typekind.h"
 #include "type/types.h"
 #include "type/typetable.h"
-#include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
-#include "util/numeric.h"
 #include "util/scoping.h"
 #include "util/types.h"
 
@@ -53,11 +49,6 @@ bool TypeCheckVisitor::visitIdentifier(IdentifierNode* node)
     {
         node->mFlags.set(cExprIsMutable, true);
     }
-
-    // If we have a function value, a syscall value, or our symbol is a const expr already, mark us as such.
-    bool isConstExpr = s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall ||
-                       s->mFlags.test(SymbolFlags::cConstExpr);
-    node->mFlags.set(cExprIsConstExpr, isConstExpr);
 
     switch (s->mSymbolType)
     {
@@ -121,38 +112,7 @@ bool TypeCheckVisitor::visitCast(CastNode* node)
         return true;
     }
 
-    // If we have a cast from float to int, make sure the float isn't too large (or small).
-    PrimitiveTypeKind fromKind = getPrimitiveKind(node->mTarget->mResolvedType);
-    PrimitiveTypeKind toKind = getPrimitiveKind(targetType);
-    if (fromKind == PrimitiveTypeKind::cFloat && toKind == PrimitiveTypeKind::cInt &&
-        node->mTarget->mFlags.test(cExprIsConstExpr))
-    {
-        // Do const eval stuff.
-        ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        if (evaluator.evaluate(node->mTarget, value) && value.mKind == ConstValueKind::cPrimitive &&
-            value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
-        {
-            // Do the check and report on failure.
-            i32 intValue = 0;
-            if (checkedFloatToInt(value.as.mFloat, intValue) == false)
-            {
-                mCtx.report<cInvalidFloatToIntCast>(node->mSourceRange);
-                markError(node);
-                return true;
-            }
-        }
-    }
-
     node->mResolvedType = targetType;
-
-    // If the target is a constexpr, evaluate it.
-    if (node->mTarget->mFlags.test(cExprIsConstExpr))
-    {
-        ConstValue value;
-        ConstEvalVisitor evaluator{mCtx.mAllocator};
-        node->mFlags.set(cExprIsConstExpr, evaluator.evaluate(node, value));
-    }
 
     return true;
 }
@@ -170,7 +130,6 @@ bool TypeCheckVisitor::visitThis(ThisNode* node)
 bool TypeCheckVisitor::visitIntLiteral(IntLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -179,7 +138,6 @@ bool TypeCheckVisitor::visitIntLiteral(IntLiteralNode* node)
 bool TypeCheckVisitor::visitFloatLiteral(FloatLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cFloat);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -188,7 +146,6 @@ bool TypeCheckVisitor::visitFloatLiteral(FloatLiteralNode* node)
 bool TypeCheckVisitor::visitBoolLiteral(BoolLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -197,7 +154,6 @@ bool TypeCheckVisitor::visitBoolLiteral(BoolLiteralNode* node)
 bool TypeCheckVisitor::visitStringLiteral(StringLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cString);
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -206,7 +162,6 @@ bool TypeCheckVisitor::visitStringLiteral(StringLiteralNode* node)
 bool TypeCheckVisitor::visitNullLiteral(NullLiteralNode* node)
 {
     Type* t = mCtx.mTypes.getNullType();
-    node->mFlags.set(cExprIsConstExpr, true);
     node->mResolvedType = t;
 
     return true;
@@ -252,270 +207,84 @@ bool TypeCheckVisitor::visitFormatString(FormatStringNode* node)
 
 bool TypeCheckVisitor::visitNewObject(NewObjectNode* node)
 {
+    // If this has already been resolved, we're done.
+    if (node->mResolvedType != nullptr)
+    {
+        return true;
+    }
+
     // Visit the type specifier first.
     if (visit(node->mTypeSpecifier) == false)
     {
         return false;
     }
 
-    // Construction behavior is determined by the resolved type.
-    Type* baseType = node->mTypeSpecifier->mType;
-    if (isMissingOrErrorType(baseType))
+    // Get the resolved type.
+    Type* type = node->mTypeSpecifier->mType;
+    if (type->mKind == TypeKind::cError)
     {
         markError(node);
         return true;
     }
 
-    // Check for "new" eligibility.
-    if (baseType->mKind != TypeKind::cStruct && baseType->mKind != TypeKind::cClass &&
-        baseType->mKind != TypeKind::cList && baseType->mKind != TypeKind::cMap)
+    // We only accept structs, classes, lists, and maps here.
+    if (type->mKind != TypeKind::cStruct && type->mKind != TypeKind::cClass && type->mKind != TypeKind::cList &&
+        type->mKind != TypeKind::cMap)
     {
-        mCtx.report<cInvalidNewExpression>(node->mSourceRange, typeToString(baseType));
+        mCtx.report<cInvalidNewExpression>(node->mSourceRange, typeToString(type));
         markError(node);
         return true;
     }
 
-    // Named initializers are not allowed for anything except structs.
-    if (baseType->mKind != TypeKind::cStruct && node->mFieldInitializers.empty() == false)
+    // Resolve the args.
+    for (CallArgument& arg : node->mArgs)
     {
-        mCtx.report<cNamedConstructionRequiresStruct>(node->mSourceRange, typeToString(baseType));
-        markError(node);
-        return true;
-    }
-
-    // Lists and maps currently only support empty construction.
-    if (baseType->mKind == TypeKind::cList || baseType->mKind == TypeKind::cMap)
-    {
-        // Disallow initializer args.
-        if (node->mInitializerArguments.empty() == false)
-        {
-            mCtx.report<cWrongArgumentCount>(node->mSourceRange, 0, node->mInitializerArguments.size());
-            markError(node);
-            return true;
-        }
-
-        // Set the resolved type as the type we have on the specifier.
-        node->mResolvedType = baseType;
-
-        return true;
-    }
-
-    // Set the resolved type as the type we have on the specifier.
-    node->mResolvedType = baseType;
-
-    // Now the two big cases we treat here.
-    auto* aggType = static_cast<AggregateType*>(baseType);
-    if (baseType->mKind == TypeKind::cClass)
-    {
-        // Use the cached class initializer.
-        Symbol* initializerSymbol = aggType->mInitMethodSymbol;
-        if (initializerSymbol == nullptr)
-        {
-            mCtx.report<cMissingClassInitializer>(node->mSourceRange, typeToString(aggType));
-            markError(node);
-            return true;
-        }
-
-        // Resolve that if it wasn't already.
-        if (resolveType(initializerSymbol) == false)
+        if (visit(arg.mValue) == false)
         {
             return false;
         }
+    }
 
-        // Check if we can access the initializer.
-        if (checkMemberAccess(initializerSymbol, aggType->mSymbol) == false)
+    // If we have a list or map, complain if we have any args.
+    if (type->mKind == TypeKind::cList || type->mKind == TypeKind::cMap)
+    {
+        node->mResolvedType = type;
+
+        if (node->mArgs.empty() == false)
         {
-            mCtx.report<cPrivateMemberAccess>(node->mSourceRange,
-                                              initializerSymbol->mIdentifier,
-                                              typeToString(aggType));
-            markError(node);
-            return true;
-        }
-
-        auto* funcType = static_cast<FunctionType*>(initializerSymbol->mType);
-
-        // Resolve the arguments.
-        for (CallArgument& argument : node->mInitializerArguments)
-        {
-            if (visit(argument.mValue) == false)
-            {
-                return false;
-            }
-        }
-
-        // Set the initializer symbol.
-        node->mInitMethodSymbol = initializerSymbol;
-
-        // Validate the initializer call.
-        if (checkCallArguments(node->mSourceRange, node->mInitializerArguments, funcType) == false)
-        {
+            mCtx.report<cWrongArgumentCount>(node->mSourceRange, 0, node->mArgs.size());
             markError(node);
         }
 
         return true;
     }
 
-    // Structs work differently as they have no init function.
-    std::vector<Symbol*> fields;
-    fields.reserve(aggType->mSymbol->mMembers.size());
-
-    for (Symbol* member : aggType->mSymbol->mMembers)
+    // For structs and classes, get the constructor symbol and resolve that.
+    auto* aggregateType = static_cast<AggregateType*>(type);
+    Symbol* constructor = aggregateType->mConstructorSymbol;
+    if (resolveType(constructor) == false)
     {
-        if (member->mSymbolType != SymbolType::cMemberVariable)
-        {
-            continue;
-        }
-
-        // Resolve all member types if they weren't already.
-        if (resolveType(member) == false)
-        {
-            return false;
-        }
-
-        fields.push_back(member);
+        return false;
     }
 
-    // Check if we have positional stuff for structs.
-    if (node->mInitializerArguments.empty() == false)
+    // Make sure the constructor is accessible.
+    if (checkMemberAccess(constructor, aggregateType->mSymbol) == false)
     {
-        // If we have any, we expect one for each field.
-        if (node->mInitializerArguments.size() != fields.size())
-        {
-            mCtx.report<cWrongArgumentCount>(node->mSourceRange, fields.size(), node->mInitializerArguments.size());
-            markError(node);
-            return true;
-        }
-
-        // inout stuff is not allowed.
-        bool argumentsOk = true;
-        for (usize i = 0; i < node->mInitializerArguments.size(); ++i)
-        {
-            const CallArgument& argument = node->mInitializerArguments[i];
-            if (argument.mIsInOut)
-            {
-                mCtx.report<cUnexpectedInOutArgument>(argument.mSourceRange, i + 1);
-                argumentsOk = false;
-            }
-        }
-
-        // If any argument is invalid, mark the node as error.
-        if (argumentsOk == false)
-        {
-            markError(node);
-            return true;
-        }
-
-        // Otherwise, copy the call args as field initializers into the node.
-        std::vector<FieldInitializer*> initializers;
-        initializers.reserve(fields.size());
-        for (usize i = 0; i < fields.size(); ++i)
-        {
-            const CallArgument& argument = node->mInitializerArguments[i];
-            initializers.push_back(mCtx.allocate<FieldInitializer>(argument.mSourceRange,
-                                                                   argument.mValue->mSourceRange,
-                                                                   fields[i]->mIdentifier,
-                                                                   argument.mValue));
-        }
-
-        node->mFieldInitializers = makeArrayView(mCtx.mAllocator, initializers);
-        node->mInitializerArguments = {};
+        mCtx.report<cPrivateMemberAccess>(node->mSourceRange, constructor->mIdentifier, typeToString(type));
+        markError(node);
+        return true;
     }
 
-    // Now validate the field initializers.
-    std::vector initialized(fields.size(), false);
-    bool initializersOk = true;
+    // Fill the node with the constructor and resolved type.
+    node->mConstructorSymbol = constructor;
+    node->mResolvedType = type;
 
-    for (auto init : node->mFieldInitializers)
-    {
-        // Resolve the initializer value.
-        if (visit(init->mValue) == false)
-        {
-            return false;
-        }
-
-        // Check whether the specified initializer actually exists on the aggregate.
-        usize fieldIndex = fields.size();
-        for (usize i = 0; i < fields.size(); ++i)
-        {
-            if (fields[i]->mIdentifier == init->mIdentifier)
-            {
-                fieldIndex = i;
-                break;
-            }
-        }
-
-        if (fieldIndex == fields.size())
-        {
-            mCtx.report<cMemberNotFound>(init->mIdentifierRange, typeToString(baseType), init->mIdentifier);
-            initializersOk = false;
-            continue;
-        }
-
-        // Get the relevant field symbol.
-        Symbol* field = fields[fieldIndex];
-        if (checkMemberAccess(field, aggType->mSymbol) == false)
-        {
-            mCtx.report<cPrivateMemberAccess>(init->mIdentifierRange, field->mIdentifier, typeToString(baseType));
-            initializersOk = false;
-            continue;
-        }
-
-        // If the field is already initialized, this is an error.
-        if (initialized[fieldIndex])
-        {
-            mCtx.report<cDuplicateFieldInitializer>(init->mIdentifierRange, init->mIdentifier);
-            initializersOk = false;
-            continue;
-        }
-
-        initialized[fieldIndex] = true;
-        init->mResolvedField = field;
-
-        // If something went wrong earlier for the field or initializer, skip it.
-        if (hasValidResolvedType(init->mValue) == false || isMissingOrErrorType(field->mType))
-        {
-            initializersOk = false;
-            continue;
-        }
-
-        // Otherwise, do conversion stuff.
-        if (convertExpressionToType(init->mValue, field->mType) == false)
-        {
-            initializersOk = false;
-        }
-    }
-
-    // Then, go over all field symbols to see if we initialized all of them.
-    for (usize i = 0; i < fields.size(); ++i)
-    {
-        if (initialized[i] == false)
-        {
-            //  If the field declaration has no default initializer that can be used instead, report an error.
-            Symbol* field = fields[i];
-            auto* fieldDecl = static_cast<VariableDeclarationStatementNode*>(field->mDeclNode);
-            if (fieldDecl->mInit == nullptr)
-            {
-                auto diag = mCtx.report<cMissingFieldInitializer>(node->mSourceRange, field->mIdentifier);
-                SourceRange fieldRange = getSymbolSourceRange(field);
-                if (fieldRange.isValid())
-                {
-                    diag.note<cFieldDeclaredHere>(fieldRange, field->mIdentifier);
-                }
-
-                // Keep going over all fields even if one failed.
-                initializersOk = false;
-            }
-        }
-    }
-
-    if (initializersOk == false)
+    // Make sure the constructor stuff matches.
+    auto* functionType = static_cast<FunctionType*>(constructor->mType);
+    if (checkCallArguments(node->mSourceRange, node->mArgs, functionType) == false)
     {
         markError(node);
     }
-
-    ConstValue cv;
-    ConstEvalVisitor cev{mCtx.mAllocator};
-    node->mFlags.set(cExprIsConstExpr, cev.evaluate(node, cv));
 
     return true;
 }
@@ -978,11 +747,11 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         return false;
     }
 
-    // Disallow access to class initializers.
-    if (receiverType->mKind == TypeKind::cClass &&
-        static_cast<AggregateType*>(receiverType)->mInitMethodSymbol == memberSymbol)
+    // Disallow access to constructors.
+    if ((receiverType->mKind == TypeKind::cStruct || receiverType->mKind == TypeKind::cClass) &&
+        static_cast<AggregateType*>(receiverType)->mConstructorSymbol == memberSymbol)
     {
-        mCtx.report<cInitializerAccess>(node->mSourceRange);
+        mCtx.report<cConstructorAccess>(node->mSourceRange);
         markError(node);
         return true;
     }
@@ -1035,14 +804,6 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         if (receiverCanMutate && memberSymbol->mFlags.test(SymbolFlags::cMutable))
         {
             node->mFlags.set(cExprIsMutable, true);
-        }
-
-        // For structs, check constexpr-ness.
-        if (receiverType->mKind == TypeKind::cStruct && node->mReceiver->mFlags.test(cExprIsConstExpr))
-        {
-            ConstValue cv;
-            ConstEvalVisitor cev{mCtx.mAllocator};
-            node->mFlags.set(cExprIsConstExpr, cev.evaluate(node, cv));
         }
     }
 

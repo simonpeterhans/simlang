@@ -9,6 +9,7 @@ namespace simlang
 {
 
 class Scope;
+struct ConstructorAnalysis;
 struct ExpressionNode;
 struct Identifier;
 struct ModuleEntry;
@@ -132,9 +133,9 @@ struct FunctionDeclarationStatementNode : StatementNode
                                               ArrayView<ParamNode*> params,
                                               TypeSpecifierNode* returnTypeSpec,
                                               StatementNode* body,
-                                              bool isInitMethod)
+                                              bool isConstructor)
         : StatementNode(NodeType::cFunctionDeclarationStatement, range)
-        , mIsInitMethod(isInitMethod)
+        , mIsConstructor(isConstructor)
         , mIdentifierRange(identifierRange)
         , mIdentifier(identifier)
         , mParams(params)
@@ -143,7 +144,7 @@ struct FunctionDeclarationStatementNode : StatementNode
     {
     }
 
-    bool mIsInitMethod;
+    bool mIsConstructor;
     SourceRange mIdentifierRange;
     Identifier* mIdentifier;
     ArrayView<ParamNode*> mParams;
@@ -154,8 +155,7 @@ struct FunctionDeclarationStatementNode : StatementNode
     Symbol* mSymbol = nullptr;
     Scope* mScope = nullptr;
 
-    // Fields assigned in the initializer (constructor) body.
-    ArrayView<Symbol*> mInitializerAssignedFields;
+    const ConstructorAnalysis* mConstructorAnalysis = nullptr;
 };
 
 enum class TypeDeclarationKind : u8

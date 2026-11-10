@@ -53,21 +53,30 @@ import math;
 // Value-type struct.
 struct Tile
 {
-    var pos: Vec2 = new Vec2(x: 0, y: 0);
-    var height: int = 0;
+    var pos: Vec2;
+    var height: int;
+
+    init(position: Vec2, elevation: int)
+    {
+        this.pos = position;
+        this.height = elevation;
+    }
 }
 
 // Reference-type class.
 class Terrain
 {
     var size: Vec2;
-    var tiles = new list<Tile>();
-    var peak = 0;
+    var tiles: list<Tile>;
+    var peak: int;
 
     init(width: int, height: int)
     {
-        // Class members without defaults have to be initialized here.
+        // Every construction calls an explicit init, which owns field initialization.
         this.size = new Vec2(width, height);
+        this.tiles = new list<Tile>();
+        this.peak = 0;
+        
         // Reserve space for the list.
         this.tiles.reserve(width * height);
     }
@@ -75,7 +84,7 @@ class Terrain
     fun addTile(x: int, y: int, tileHeight: int)
     {
         var pos = new Vec2(x, y);
-        var tile = new Tile(pos: pos, height: tileHeight);
+        var tile = new Tile(pos, tileHeight);
         tiles.add(tile);
 
         if (tileHeight > peak)

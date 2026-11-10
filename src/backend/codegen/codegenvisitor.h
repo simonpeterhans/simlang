@@ -17,6 +17,8 @@ template <typename T>
 class ArrayView;
 struct AggregateType;
 struct CompilerContext;
+struct ConstValue;
+struct ConstructorAnalysis;
 struct FunctionInfo;
 struct FunctionType;
 struct InterfaceType;
@@ -33,7 +35,7 @@ enum class PrimitiveTypeKind : u8;
 class CodeGenVisitor : public ASTWalker<CodeGenVisitor>
 {
 public:
-    explicit CodeGenVisitor(CompilerContext& ctx);
+    explicit CodeGenVisitor(CompilerContext& ctx, bool optimize);
 
     bool emitLambdaBodies();
 
@@ -164,6 +166,7 @@ private:
     MapAccessIdx getMapAccessIndex(MapType* mapType, FieldOffset valueFieldOffset, OpWordCount valueWords);
 
     // Call and interface emission.
+    void emitCallableValue(Symbol* symbol);
     bool emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType);
     bool emitMethodReceiver(MemberAccessNode* memberAccess);
     bool emitInterfaceMethodDispatch(MemberAccessNode* memberAccess, const FunctionType* funcType);
@@ -176,6 +179,8 @@ private:
     // Object construction.
     bool emitNewList(ListType* listType);
     bool emitNewMap(MapType* mapType);
+    bool emitConstValue(const ConstValue& value, Type* type);
+    bool emitTrivialConstructorFields(NewObjectNode* node, const ConstructorAnalysis* analysis);
     bool emitNewClass(NewObjectNode* node, AggregateType* classType);
     bool emitNewStruct(NewObjectNode* node, AggregateType* structType);
 
@@ -185,6 +190,7 @@ private:
 
     CompilerContext& mCtx;
     BytecodeBuilder mBytecodeBuilder;
+    bool mOptimize;
 
     std::vector<ControlContext> mControlStack;
     std::vector<SourceRange> mSourceRangeStack;

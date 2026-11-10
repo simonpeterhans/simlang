@@ -567,7 +567,7 @@ bool CodeGenVisitor::emitAddress(ExpressionNode* expr, AddressMode mode)
         {
             // In all other cases, we only allow read-only from temporaries.
             // condition ? pointA : pointB
-            // new Point(x: 1, y: 2)
+            // new Point(1, 2)
             // someFunctionReturningStruct()
             // cast<Point>(...)
             if (mode == AddressMode::cReadOnly)

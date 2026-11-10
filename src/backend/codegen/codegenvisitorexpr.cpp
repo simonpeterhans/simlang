@@ -120,26 +120,12 @@ bool CodeGenVisitor::visitIdentifier(IdentifierNode* node)
     // If this is a function or a syscall and we visit it, emit it as callable value.
     if (symbol->mSymbolType == SymbolType::cFunction || symbol->mSymbolType == SymbolType::cSyscall)
     {
-        emitIntegerImmediate(cNullRef);
-
-        VMWord entryToken = cInvalidFunctionEntryToken;
-        if (symbol->mSymbolType == SymbolType::cFunction)
-        {
-            entryToken = makeFunctionEntryToken(static_cast<FunctionIdx>(symbol->mIndex));
-        }
-        else
-        {
-            entryToken =
-                makeSyscallEntryToken(mCtx.mBackend.mFunctionInfos.size(), static_cast<SyscallIdx>(symbol->mIndex));
-        }
-
-        emit<OpCode::cPush32>(entryToken);
-
+        emitCallableValue(symbol);
         return true;
     }
 
     // If this is a constexpr, we can try to emit the value directly.
-    if (symbol->mFlags.test(SymbolFlags::cConstExpr))
+    if (symbol->mConstEvalState == ConstEvalState::cReady)
     {
         if (node->mResolvedType->mKind == TypeKind::cPrimitive)
         {
@@ -345,15 +331,11 @@ bool CodeGenVisitor::emitLambdaCaptureValue(const LambdaNode* lambda, const Lamb
 bool CodeGenVisitor::visitLambda(LambdaNode* node)
 {
     // This emits the pair of lambda closure (environment) and function entry token.
-    // Get the function (lambda) index.
-    FunctionIdx functionIndex = static_cast<FunctionIdx>(node->mSymbol->mIndex);
-
     if (node->mCaptures.empty())
     {
         // If we have 0 captures, we have a null environment.
-        emitIntegerImmediate(cNullRef);
         // This means we don't have to create an environment and can directly push the converted index as entry token.
-        emit<OpCode::cPush32>(makeFunctionEntryToken(functionIndex));
+        emitCallableValue(node->mSymbol);
         return true;
     }
 
@@ -367,6 +349,8 @@ bool CodeGenVisitor::visitLambda(LambdaNode* node)
     }
 
     // Create the closure (with the environment) based on what we just pushed before.
+    // Get the function (lambda) index.
+    FunctionIdx functionIndex = static_cast<FunctionIdx>(node->mSymbol->mIndex);
     emit<OpCode::cNewClosure>(functionIndex);
 
     return true;

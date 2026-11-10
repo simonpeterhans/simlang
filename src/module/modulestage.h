@@ -15,6 +15,7 @@ enum class ModuleStage : u8
     cThisRewritten,
     cCapturesAnalyzed,
     cTypesChecked,
+    cConstsAnalyzed,
     cConstsFolded
 };
 

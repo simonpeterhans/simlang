@@ -21,7 +21,6 @@ class Source;
 class Tokenizer;
 struct CallArgument;
 struct ExpressionNode;
-struct FieldInitializer;
 struct Identifier;
 struct ParamNode;
 struct ParserContext;
@@ -135,7 +134,7 @@ private:
     ExpressionNode* parseParen();
     ExpressionNode* parseNew();
     ExpressionNode* parseLambda();
-    bool parseArgumentList(std::vector<CallArgument>& args, std::vector<FieldInitializer*>* fields = nullptr);
+    bool parseArgumentList(std::vector<CallArgument>& args);
     ExpressionNode* parseFunctionCall(ExpressionNode* lhs);
     ExpressionNode* parseIndexCall(ExpressionNode* lhs);
     ExpressionNode* parseMemberAccess(ExpressionNode* lhs);
@@ -172,8 +171,9 @@ private:
     bool parseTemplateParameterList(std::vector<Identifier*>& params);
 
     ParamNode* parseFunctionParameter();
+    StatementNode* parseFieldDeclaration();
     StatementNode* parseFunctionDeclaration();
-    StatementNode* parseInitializerDeclaration();
+    StatementNode* parseConstructorDeclaration();
     StatementNode* parseTypeDeclaration();
     StatementNode* parseTemplateDeclaration();
     StatementNode* parseImportDeclaration();
@@ -190,7 +190,6 @@ private:
     Tokenizer& mTokenizer;
     Token mCurrentToken = cErrorToken;
     SourceLocation mPreviousTokenEnd = cInvalidSourceLoc;
-    bool mInTypeDeclaration = false;
     bool mInClass = false;
     bool mInInterface = false;
 };

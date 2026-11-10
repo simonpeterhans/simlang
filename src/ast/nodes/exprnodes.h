@@ -152,28 +152,6 @@ struct FormatStringNode : ExpressionNode
     ArrayView<ExpressionNode*> mArgs;
 };
 
-struct FieldInitializer
-{
-    explicit FieldInitializer(SourceRange range,
-                              SourceRange identifierRange,
-                              Identifier* identifier,
-                              ExpressionNode* value)
-        : mSourceRange(range)
-        , mIdentifierRange(identifierRange)
-        , mIdentifier(identifier)
-        , mValue(value)
-    {
-    }
-
-    SourceRange mSourceRange;
-    SourceRange mIdentifierRange;
-    Identifier* mIdentifier;
-    ExpressionNode* mValue;
-
-    // The resolved field the initializer is initializing.
-    Symbol* mResolvedField = nullptr;
-};
-
 struct CallArgument
 {
     SourceRange mSourceRange;
@@ -183,23 +161,18 @@ struct CallArgument
 
 struct NewObjectNode : ExpressionNode
 {
-    explicit NewObjectNode(SourceRange range,
-                           TypeSpecifierNode* typeSpecifier,
-                           ArrayView<FieldInitializer*> fieldInitializers,
-                           ArrayView<CallArgument> initializerArguments)
+    explicit NewObjectNode(SourceRange range, TypeSpecifierNode* typeSpecifier, ArrayView<CallArgument> args)
         : ExpressionNode(NodeType::cNewObject, range)
         , mTypeSpecifier(typeSpecifier)
-        , mFieldInitializers(fieldInitializers)
-        , mInitializerArguments(initializerArguments)
+        , mArgs(args)
     {
     }
 
     TypeSpecifierNode* mTypeSpecifier;
-    ArrayView<FieldInitializer*> mFieldInitializers;
-    ArrayView<CallArgument> mInitializerArguments;
+    ArrayView<CallArgument> mArgs;
 
-    // The selected class init method.
-    Symbol* mInitMethodSymbol = nullptr;
+    // The selected constructor (unused for lists/maps).
+    Symbol* mConstructorSymbol = nullptr;
 };
 
 enum class LambdaCaptureKind : u8

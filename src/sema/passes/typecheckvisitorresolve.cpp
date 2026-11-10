@@ -98,10 +98,10 @@ bool TypeCheckVisitor::resolveFunctionSignature(FunctionDeclarationStatementNode
         return true;
     }
 
-    // Initializers and functions with no return type always return void.
+    // Constructors and functions with no return type always return void.
     Type* functionReturnType = mCtx.mTypes.getVoidType();
-    // For non-initializers, resolve and use the return type spec.
-    if (node->mIsInitMethod == false && node->mReturnTypeSpec != nullptr)
+    // For non-constructors, resolve and use the return type spec.
+    if (node->mIsConstructor == false && node->mReturnTypeSpec != nullptr)
     {
         if (visit(node->mReturnTypeSpec) == false)
         {

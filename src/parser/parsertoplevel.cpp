@@ -110,6 +110,49 @@ bool Parser::parseTemplateParameterList(std::vector<Identifier*>& params)
     }
 }
 
+StatementNode* Parser::parseFieldDeclaration()
+{
+    // (var | const) identifier : type ;
+
+    // Consume the "var" or "const".
+    Token startToken = consume();
+
+    // Consume the identifier.
+    Token nameToken = cErrorToken;
+    if (expect(TokenType::cIdentifier, &nameToken, true) == false)
+    {
+        return nullptr;
+    }
+
+    // Consume the ':'.
+    if (tryConsume(TokenType::cColon) == false)
+    {
+        mCtx.report<cFieldTypeRequired>(nameToken.getRange(), nameToken.mIdentifier);
+        return nullptr;
+    }
+
+    // Parse the type specifier.
+    TypeSpecifierNode* typeSpec = parseTypeSpec();
+    if (typeSpec == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Consume the ';'.
+    if (expectSemi() == false)
+    {
+        return nullptr;
+    }
+
+    auto* field = mCtx.create<VariableDeclarationStatementNode>(makeRangeToPrevious(startToken),
+                                                                nameToken.getRange(),
+                                                                nameToken.mIdentifier,
+                                                                typeSpec,
+                                                                nullptr);
+    field->mFlags.set(cStmtIsMutable, startToken.mType == TokenType::cVar);
+    return field;
+}
+
 StatementNode* Parser::parseFunctionDeclaration()
 {
     Token keywordToken = consume();
@@ -206,7 +249,7 @@ StatementNode* Parser::parseFunctionDeclaration()
     return buildNode();
 }
 
-StatementNode* Parser::parseInitializerDeclaration()
+StatementNode* Parser::parseConstructorDeclaration()
 {
     Token initToken = consume();
     StatementNode* body = nullptr;
@@ -293,7 +336,6 @@ StatementNode* Parser::parseTypeDeclaration()
     bool isClass = (declarationKind == TypeDeclarationKind::cClass);
     bool isInterface = (declarationKind == TypeDeclarationKind::cInterface);
 
-    ScopedValueBinder svb{mInTypeDeclaration, true};
     ScopedValueBinder cvb{mInClass, isClass};
     ScopedValueBinder ivb{mInInterface, isInterface};
 
@@ -439,7 +481,7 @@ StatementNode* Parser::parseTypeMember()
         case TokenType::cVar:
         case TokenType::cConst:
         {
-            result = parseVariableDeclaration(true);
+            result = parseFieldDeclaration();
             break;
         }
         case TokenType::cFun:
@@ -451,7 +493,7 @@ StatementNode* Parser::parseTypeMember()
         {
             if (getCurrentToken().mIdentifier == mCtx.mIdentifiers.getInitIdentifier())
             {
-                result = parseInitializerDeclaration();
+                result = parseConstructorDeclaration();
                 break;
             }
 
@@ -478,7 +520,7 @@ StatementNode* Parser::parseTypeMember()
         if (result->mNodeType == NodeType::cFunctionDeclarationStatement)
         {
             auto* fun = static_cast<FunctionDeclarationStatementNode*>(result);
-            isMethod = (fun->mIsInitMethod == false);
+            isMethod = (fun->mIsConstructor == false);
         }
 
         if (mInClass == false || isMethod == false)

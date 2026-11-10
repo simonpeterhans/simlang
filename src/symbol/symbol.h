@@ -17,13 +17,12 @@ struct Type;
 // clang-format off
 enum class SymbolFlags : u8
 {
-    cNone      = 0,
+    cNone    = 0,
 
-    cPrivate   = 1 << 0,
-    cImpl      = 1 << 1,
-    cMutable   = 1 << 2,
-    cInOut     = 1 << 3,
-    cConstExpr = 1 << 4,
+    cPrivate = 1 << 0,
+    cImpl    = 1 << 1,
+    cMutable = 1 << 2,
+    cInOut   = 1 << 3,
 };
 // clang-format on
 

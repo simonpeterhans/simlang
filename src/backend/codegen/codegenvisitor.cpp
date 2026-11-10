@@ -18,9 +18,10 @@
 namespace simlang
 {
 
-CodeGenVisitor::CodeGenVisitor(CompilerContext& ctx)
+CodeGenVisitor::CodeGenVisitor(CompilerContext& ctx, bool optimize)
     : mCtx(ctx)
     , mBytecodeBuilder(ctx.mBackend.mProgramBytecode)
+    , mOptimize(optimize)
 {
     mControlStack.reserve(16);
 

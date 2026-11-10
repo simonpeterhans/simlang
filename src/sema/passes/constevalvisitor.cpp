@@ -1,5 +1,7 @@
 #include "sema/passes/constevalvisitor.h"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -8,30 +10,79 @@
 #include "ast/nodes/exprnodes.h"
 #include "ast/nodes/stmtnodes.h"
 #include "ast/unaryop.h"
+#include "sema/constructoranalysis.h"
 #include "symbol/internedstring.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
 #include "type/typekind.h"
 #include "type/types.h"
 #include "util/arena.h"
-#include "util/arenautils.h"
 #include "util/arrayview.h"
 #include "util/flags.h"
 #include "util/numeric.h"
+#include "util/scoping.h"
 #include "util/types.h"
 
 namespace simlang
 {
 
-ConstEvalVisitor::ConstEvalVisitor(ArenaAllocator& allocator)
-    : mAllocator(allocator)
+ConstEvalVisitor::ConstEvalVisitor(ConstEvaluator& evaluator)
+    : mEvaluator(evaluator)
+    , mAllocator(evaluator.getAllocator())
 {
 }
 
-bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue)
+bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue, ConstEvalFailure* failure)
 {
-    // Reset our state before we go, this visitor is reusable.
+    if (failure != nullptr)
+    {
+        *failure = {};
+    }
+
+    ScopedValueBinder failureScope{mFailure, failure};
+
+    return evaluateValue(node, outValue);
+}
+
+bool ConstEvalVisitor::evaluateSymbol(Symbol* symbol, ConstValue& outValue, ConstEvalFailure* failure)
+{
+    if (failure != nullptr)
+    {
+        *failure = {};
+    }
+
+    ScopedValueBinder failureScope{mFailure, failure};
+
     mValue = ConstValue::makeInvalid();
+
+    bool success = evaluateSymbolValue(symbol);
+
+    outValue = success ? mValue : ConstValue::makeInvalid();
+
+    return success;
+}
+
+bool ConstEvalVisitor::fail(ConstEvalFailureKind kind, ExpressionNode* expression, i32 shiftCount)
+{
+    // Later constructor arguments must still evaluate without overwriting the first failure.
+    if (mFailure != nullptr && mFailure->mKind == ConstEvalFailureKind::cNone)
+    {
+        *mFailure = ConstEvalFailure{kind, expression, shiftCount};
+    }
+
+    return false;
+}
+
+bool ConstEvalVisitor::evaluateValue(ExpressionNode* node, ConstValue& outValue)
+{
+    // Each subtree query replaces the current result.
+    mValue = ConstValue::makeInvalid();
+
+    if (node == nullptr)
+    {
+        outValue = mValue;
+        return false;
+    }
 
     if (visit(node) == false)
     {
@@ -40,81 +91,46 @@ bool ConstEvalVisitor::evaluate(ExpressionNode* node, ConstValue& outValue)
     }
 
     outValue = mValue;
-
     return true;
 }
 
-static bool applyConstCast(ConstValue& value, Type* targetType)
+static bool applyConstCast(ConstValue& value, Type* sourceType, Type* targetType)
 {
-    // Allow cast to null for classes, lists, maps, and interfaces.
-    if (value.mKind == ConstValueKind::cNull)
-    {
-        return targetType->mKind == TypeKind::cClass || targetType->mKind == TypeKind::cList ||
-               targetType->mKind == TypeKind::cMap || targetType->mKind == TypeKind::cInterface;
-    }
-
-    // The only valid function cast is the same exact signature.
-    // That means we can just compare types.
-    if (value.mKind == ConstValueKind::cFunction)
-    {
-        return value.as.mFunction != nullptr && value.as.mFunction->mType == targetType;
-    }
-
-    // Otherwise, the type has to be a primitive.
-    if (targetType->mKind != TypeKind::cPrimitive)
-    {
-        return false;
-    }
-
-    // The value also has to be a primitive, or the cast will fail.
-    if (value.mKind != ConstValueKind::cPrimitive)
-    {
-        return false;
-    }
-
-    auto* primitiveTarget = static_cast<PrimitiveType*>(targetType);
-    PrimitiveTypeKind targetKind = primitiveTarget->mPrimitiveKind;
-
-    // If we already have the right type, we're done.
-    if (targetKind == value.mPrimitiveKind)
+    // Identity casts preserve the value, including nested structs. Valid reference casts preserve null.
+    if (sourceType == targetType || value.mKind == ConstValueKind::cNull)
     {
         return true;
     }
 
-    // Otherwise, do int/float/bool casts.
-    if (targetKind == PrimitiveTypeKind::cInt && value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
+    // Type checking leaves only conversions between int, float, and bool.
+    auto* primitiveTarget = static_cast<PrimitiveType*>(targetType);
+    PrimitiveTypeKind targetKind = primitiveTarget->mPrimitiveKind;
+    if (targetKind == PrimitiveTypeKind::cInt)
     {
-        i32 intValue = 0;
-        if (checkedFloatToInt(value.as.mFloat, intValue) == false)
+        if (value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
         {
-            return false;
+            i32 intValue = 0;
+            if (checkedFloatToInt(value.as.mFloat, intValue) == false)
+            {
+                return false;
+            }
+            value = ConstValue::makeInteger(intValue);
         }
-
-        value = ConstValue::makeInteger(intValue);
+        else
+        {
+            value = ConstValue::makeInteger(value.as.mBool ? 1 : 0);
+        }
     }
-    else if (targetKind == PrimitiveTypeKind::cInt && value.mPrimitiveKind == PrimitiveTypeKind::cBool)
+    else if (targetKind == PrimitiveTypeKind::cFloat)
     {
-        value = ConstValue::makeInteger(value.as.mBool ? 1 : 0);
-    }
-    else if (targetKind == PrimitiveTypeKind::cFloat && value.mPrimitiveKind == PrimitiveTypeKind::cInt)
-    {
-        value = ConstValue::makeFloat(static_cast<f32>(value.as.mInteger));
-    }
-    else if (targetKind == PrimitiveTypeKind::cFloat && value.mPrimitiveKind == PrimitiveTypeKind::cBool)
-    {
-        value = ConstValue::makeFloat(value.as.mBool ? 1.0f : 0.0f);
-    }
-    else if (targetKind == PrimitiveTypeKind::cBool && value.mPrimitiveKind == PrimitiveTypeKind::cInt)
-    {
-        value = ConstValue::makeBool(value.as.mInteger != 0);
-    }
-    else if (targetKind == PrimitiveTypeKind::cBool && value.mPrimitiveKind == PrimitiveTypeKind::cFloat)
-    {
-        value = ConstValue::makeBool(value.as.mFloat != 0.0f);
+        value =
+            ConstValue::makeFloat(value.mPrimitiveKind == PrimitiveTypeKind::cInt ? static_cast<f32>(value.as.mInteger)
+                                                                                  : (value.as.mBool ? 1.0f : 0.0f));
     }
     else
     {
-        return false;
+        value = ConstValue::makeBool(value.mPrimitiveKind == PrimitiveTypeKind::cInt ? value.as.mInteger != 0
+                                                                                     : value.as.mFloat != 0.0f);
     }
 
     return true;
@@ -123,30 +139,59 @@ static bool applyConstCast(ConstValue& value, Type* targetType)
 bool ConstEvalVisitor::visitImplicitCast(ImplicitCastNode* node)
 {
     // Resolve the target type.
-    if (visit(node->mTarget) == false)
+    if (evaluateValue(node->mTarget, mValue) == false)
     {
         return false;
     }
 
     // Apply the cast.
-    return applyConstCast(mValue, node->mResolvedType);
+    return applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType);
 }
 
 bool ConstEvalVisitor::visitCast(CastNode* node)
 {
     // Resolve the target type.
-    if (visit(node->mTarget) == false)
+    if (evaluateValue(node->mTarget, mValue) == false)
     {
         return false;
     }
 
     // Apply the cast.
-    return applyConstCast(mValue, node->mResolvedType);
+    if (applyConstCast(mValue, node->mTarget->mResolvedType, node->mResolvedType) == false)
+    {
+        return fail(ConstEvalFailureKind::cInvalidFloatToIntCast, node);
+    }
+
+    return true;
 }
 
 bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
 {
-    Symbol* s = node->mSymbol;
+    return evaluateSymbolValue(node->mSymbol);
+}
+
+bool ConstEvalVisitor::evaluateSymbolValue(Symbol* s)
+{
+    // Check if this is a parameter, in which case we might be evaluating a call.
+    if (s->mSymbolType == SymbolType::cParameter)
+    {
+        // If we are, try to look up the value since it might be const eval (e.g. new Vector(0.0, 0.0, 0.0);).
+        if (mFrame != nullptr)
+        {
+            // This is currently only supported for constructors.
+            for (usize i = 0; i < mFrame->mConstructor->mParams.size(); ++i)
+            {
+                auto* param = static_cast<ParamDeclarationNode*>(mFrame->mConstructor->mParams[i]);
+                if (param->mSymbol == s)
+                {
+                    mValue = mFrame->mArguments[i];
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     // If we have a function or a syscall, we can directly handle that (sine they're immutable anyway).
     if (s->mSymbolType == SymbolType::cFunction || s->mSymbolType == SymbolType::cSyscall)
@@ -161,9 +206,9 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
         return false;
     }
 
-    // Only symbols explicitly marked constexpr participate in constexpr evaluation.
-    // (TypeCheckVisitor already sets SymbolFlags::cConstExpr when the initializer is constexpr.)
-    if (s->mFlags.test(SymbolFlags::cConstExpr) == false)
+    // Params need to go through the call bindings, fields through their receiver.
+    // That means we only accept globals and locals here.
+    if (s->mSymbolType != SymbolType::cGlobalVariable && s->mSymbolType != SymbolType::cStackVariable)
     {
         return false;
     }
@@ -195,7 +240,10 @@ bool ConstEvalVisitor::visitIdentifier(IdentifierNode* node)
     s->mConstEvalState = ConstEvalState::cProcessing;
 
     auto* decl = static_cast<VariableDeclarationStatementNode*>(s->mDeclNode);
-    if (visit(decl->mInit) == false)
+    // Global initializers are independent of the constructor that requested their value.
+    ScopedValueBinder frameScope{mFrame, s->mSymbolType == SymbolType::cGlobalVariable ? nullptr : mFrame};
+    // Multi-variable bindings have no individual initializer and cannot currently be constant evaluated.
+    if (evaluateValue(decl->mInit, mValue) == false)
     {
         s->mConstEvalState = ConstEvalState::cFailed;
         return false;
@@ -261,61 +309,78 @@ bool ConstEvalVisitor::visitFormatString(FormatStringNode*)
 
 bool ConstEvalVisitor::visitNewObject(NewObjectNode* node)
 {
-    // Only structs can be consteval.
+    // Only struct constructors are currently const eval.
     if (node->mResolvedType->mKind != TypeKind::cStruct)
     {
         return false;
     }
 
-    auto* structType = static_cast<AggregateType*>(node->mResolvedType);
+    // Get the constructor analysis.
+    auto* type = static_cast<AggregateType*>(node->mResolvedType);
+    ConstructorAnalyzer analyzer{mEvaluator};
+    const ConstructorAnalysis* analysis = analyzer.analyze(type, node->mConstructorSymbol);
 
-    std::vector<ConstFieldValue> fields;
-    fields.reserve(structType->mSymbol->mMembers.size());
-
-    for (Symbol* member : structType->mSymbol->mMembers)
+    // Only constructors with a supported field-assignment body can be evaluated.
+    if (analysis->mIsConstEvaluable == false)
     {
-        if (member->mSymbolType != SymbolType::cMemberVariable)
-        {
-            continue;
-        }
-
-        // Go through all field initializers to look up our current member.
-        ExpressionNode* valueExpr = nullptr;
-        for (FieldInitializer* init : node->mFieldInitializers)
-        {
-            if (init->mResolvedField == member)
-            {
-                valueExpr = init->mValue;
-                break;
-            }
-        }
-
-        // If we have no match, use the initializer from the declaration.
-        if (valueExpr == nullptr)
-        {
-            auto* decl = static_cast<VariableDeclarationStatementNode*>(member->mDeclNode);
-            valueExpr = decl->mInit;
-        }
-
-        // See if we can evaluate whatever we have now.
-        ConstValue fieldValue;
-        ConstEvalVisitor fieldEvaluator{mAllocator};
-        if (fieldEvaluator.evaluate(valueExpr, fieldValue) == false)
-        {
-            // If not, the whole thing isn't consteval.
-            return false;
-        }
-
-        ConstValue* storedValue = mAllocator.create<ConstValue>(fieldValue);
-        fields.push_back(ConstFieldValue{member, storedValue});
+        return false;
     }
 
-    // If we collected all of them, make the struct based on the values that we got.
-    auto* structValue = mAllocator.create<ConstStructValue>();
-    structValue->mType = structType;
-    structValue->mFields = makeArrayView(mAllocator, fields);
+    // Evaluate every argument in the caller's frame, including unused ones.
+    std::vector<ConstValue> arguments(node->mArgs.size());
+    bool argumentsOk = true;
+    for (usize i = 0; i < node->mArgs.size(); ++i)
+    {
+        if (evaluateValue(node->mArgs[i].mValue, arguments[i]) == false)
+        {
+            argumentsOk = false;
+        }
+    }
 
-    mValue = ConstValue::makeStruct(structValue);
+    // If any argument isn't const-evaluable, bail.
+    if (argumentsOk == false)
+    {
+        return false;
+    }
+
+    // If they all are, we prepare for the constructor call.
+    auto* declaration = static_cast<FunctionDeclarationStatementNode*>(node->mConstructorSymbol->mDeclNode);
+
+    // Recursive constructor bodies remain runtime work, nested argument expressions are already evaluated.
+    for (const CallFrame* frame = mFrame; frame != nullptr; frame = frame->mCaller)
+    {
+        if (frame->mConstructor == declaration)
+        {
+            return false;
+        }
+    }
+
+    // Store the constructor declaration and its arguments and scope it.
+    CallFrame frame{
+        declaration,
+        {arguments.data(), arguments.size()},
+        mFrame
+    };
+    ScopedValueBinder<const CallFrame*> frameScope{mFrame, &frame};
+
+    // Evaluate assignments in statement order, but store the result in declaration order for layout and equality.
+    auto* fields = mAllocator.createArray<ConstFieldValue>(analysis->mFields.size());
+    for (const FieldInitialization& field : analysis->mFields)
+    {
+        auto* value = mAllocator.create<ConstValue>();
+        if (evaluateValue(field.mExpression, *value) == false)
+        {
+            return false;
+        }
+        fields[field.mFieldIndex] = {field.mField, value};
+    }
+
+    // Then, create the const value for the struct.
+    auto* result = mAllocator.create<ConstStructValue>();
+    result->mType = type;
+    result->mFields = {fields, analysis->mFields.size()};
+    mValue = ConstValue::makeStruct(result);
+
     return true;
 }
 
@@ -332,16 +397,14 @@ bool ConstEvalVisitor::visitIndexCall(IndexCallNode*)
 
 bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
 {
-    if (node->mSymbol->mSymbolType != SymbolType::cMemberVariable)
+    // Const eval member access can only be done on structs.
+    if (node->mReceiver->mResolvedType->mKind != TypeKind::cStruct)
     {
         return false;
     }
 
-    // Const eval member access can only be done on structs.
     ConstValue receiverValue;
-    ConstEvalVisitor receiverEvaluator{mAllocator};
-    if (receiverEvaluator.evaluate(node->mReceiver, receiverValue) == false ||
-        receiverValue.mKind != ConstValueKind::cStruct)
+    if (evaluateValue(node->mReceiver, receiverValue) == false)
     {
         return false;
     }
@@ -361,12 +424,12 @@ bool ConstEvalVisitor::visitMemberAccess(MemberAccessNode* node)
 
 bool ConstEvalVisitor::visitModuleAccess(ModuleAccessNode* node)
 {
-    return visit(node->mRight);
+    return evaluateValue(node->mRight, mValue);
 }
 
 bool ConstEvalVisitor::visitUnaryOp(UnaryOpNode* node)
 {
-    if (visit(node->mExpr) == false)
+    if (evaluateValue(node->mExpr, mValue) == false)
     {
         return false;
     }
@@ -414,12 +477,21 @@ bool ConstEvalVisitor::visitUnaryOp(UnaryOpNode* node)
 bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
 {
     ConstValue l;
+    if (evaluateValue(node->mLeft, l) == false)
+    {
+        return false;
+    }
+
+    // Logical operators evaluate their right operand only when it can affect the result.
+    // This is because we might short-circuit.
+    if ((node->mOp == BinaryOp::cAnd && l.as.mBool == false) || (node->mOp == BinaryOp::cOr && l.as.mBool))
+    {
+        mValue = l;
+        return true;
+    }
+
     ConstValue r;
-
-    ConstEvalVisitor lv{mAllocator};
-    ConstEvalVisitor rv{mAllocator};
-
-    if (lv.evaluate(node->mLeft, l) == false || rv.evaluate(node->mRight, r) == false)
+    if (evaluateValue(node->mRight, r) == false)
     {
         return false;
     }
@@ -444,6 +516,17 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
 
     PrimitiveTypeKind kind = l.mPrimitiveKind;
 
+    if ((node->mOp == BinaryOp::cDiv || node->mOp == BinaryOp::cMod) && isValidConstDivisor(r) == false)
+    {
+        return fail(ConstEvalFailureKind::cDivisionByZero, node);
+    }
+
+    if ((node->mOp == BinaryOp::cShiftL || node->mOp == BinaryOp::cShiftR) &&
+        isValidConstShiftCount(r.as.mInteger) == false)
+    {
+        return fail(ConstEvalFailureKind::cShiftCountOutOfRange, node, r.as.mInteger);
+    }
+
     switch (node->mOp)
     {
         case BinaryOp::cAdd:
@@ -466,11 +549,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     case BinaryOp::cMul: result = static_cast<i32>(lhs * rhs); break;
                     case BinaryOp::cDiv:
                     {
-                        if (r.as.mInteger == 0)
-                        {
-                            return false;
-                        }
-                        else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
+                        if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
                             result = std::numeric_limits<i32>::min();
                         }
@@ -482,11 +561,7 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     }
                     case BinaryOp::cMod:
                     {
-                        if (r.as.mInteger == 0)
-                        {
-                            return false;
-                        }
-                        else if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
+                        if (l.as.mInteger == std::numeric_limits<i32>::min() && r.as.mInteger == -1)
                         {
                             result = 0;
                         }
@@ -515,36 +590,8 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                     case BinaryOp::cAdd: result = l.as.mFloat + r.as.mFloat; break;
                     case BinaryOp::cSub: result = l.as.mFloat - r.as.mFloat; break;
                     case BinaryOp::cMul: result = l.as.mFloat * r.as.mFloat; break;
-                    case BinaryOp::cDiv:
-                    {
-                        if (r.as.mFloat == 0.0f)
-                        {
-                            return false;
-                        }
-                        else
-                        {
-                            result = l.as.mFloat / r.as.mFloat;
-                        }
-                        break;
-                    }
-                    case BinaryOp::cMod:
-                    {
-                        if (r.as.mFloat == 0.0f)
-                        {
-                            return false;
-                        }
-                        else
-                        {
-                            // Does it really make sense to even provide % for floats?
-                            // q = l / r
-                            f32 q = l.as.mFloat / r.as.mFloat;
-                            // n = floor(q)
-                            i32 n = static_cast<i32>(q);
-                            // l % r = l - (n * r)
-                            result = l.as.mFloat - (static_cast<f32>(n) * r.as.mFloat);
-                        }
-                        break;
-                    }
+                    case BinaryOp::cDiv: result = l.as.mFloat / r.as.mFloat; break;
+                    case BinaryOp::cMod: result = std::fmod(l.as.mFloat, r.as.mFloat); break;
                     default:
                     {
                         return false;
@@ -572,21 +619,11 @@ bool ConstEvalVisitor::visitBinaryOp(BinaryOpNode* node)
                 case BinaryOp::cBitXor: result = l.as.mInteger ^ r.as.mInteger; break;
                 case BinaryOp::cShiftL:
                 {
-                    if (r.as.mInteger < 0 || r.as.mInteger >= 32)
-                    {
-                        return false;
-                    }
-
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) << r.as.mInteger);
                     break;
                 }
                 case BinaryOp::cShiftR:
                 {
-                    if (r.as.mInteger < 0 || r.as.mInteger >= 32)
-                    {
-                        return false;
-                    }
-
                     result = static_cast<i32>(static_cast<u32>(l.as.mInteger) >> r.as.mInteger);
                     break;
                 }
@@ -689,8 +726,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 {
     // Try to evaluate the condition.
     ConstValue conditionValue;
-    ConstEvalVisitor conditionVisitor{mAllocator};
-    if (conditionVisitor.evaluate(node->mCondition, conditionValue) == false ||
+    if (evaluateValue(node->mCondition, conditionValue) == false ||
         conditionValue.mPrimitiveKind != PrimitiveTypeKind::cBool)
     {
         return false;
@@ -701,8 +737,7 @@ bool ConstEvalVisitor::visitTernaryExpr(TernaryExprNode* node)
 
     // Evaluate that one.
     ConstValue selectedValue;
-    ConstEvalVisitor branchVisitor{mAllocator};
-    if (branchVisitor.evaluate(selectedExpr, selectedValue) == false)
+    if (evaluateValue(selectedExpr, selectedValue) == false)
     {
         return false;
     }

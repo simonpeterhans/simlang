@@ -87,8 +87,8 @@ private:
 
     // Semantic requirements and diagnostics.
     bool checkMemberAccess(Symbol* symbol, Symbol* ownerTypeSymbol) const;
-    Symbol* getInitializerAssignedField(ExpressionNode* lhs) const;
-    bool isInitializerFieldAssignment(AssignmentStatementNode* node) const;
+    Symbol* getConstructorAssignedField(ExpressionNode* lhs) const;
+    bool isConstructorFieldAssignment(AssignmentStatementNode* node) const;
     bool requireAssignableLValue(ExpressionNode* expr, bool allowImmutable = false) const;
     bool requireBoolExpression(ExpressionNode* expr) const;
     bool requirePrintablePrimitive(ExpressionNode* expr) const;

@@ -5,7 +5,7 @@
 #include "ast/nodes/stmtnodes.h"
 #include "diag/diagnosticmanager.h"
 #include "driver/compilercontext.h"
-#include "sema/passes/constevalvisitor.h"
+#include "sema/constevaluator.h"
 #include "symbol/constvalue.h"
 #include "type/typekind.h"
 #include "type/types.h"
@@ -50,14 +50,9 @@ bool ConstFoldVisitor::visitFormatString(FormatStringNode* node)
 
 bool ConstFoldVisitor::visitNewObject(NewObjectNode* node)
 {
-    for (CallArgument& arg : node->mInitializerArguments)
+    for (CallArgument& arg : node->mArgs)
     {
         foldExpr(arg.mValue);
-    }
-
-    for (FieldInitializer* init : node->mFieldInitializers)
-    {
-        foldExpr(init->mValue);
     }
 
     return true;
@@ -209,6 +204,12 @@ void ConstFoldVisitor::foldExpr(ExpressionNode*& e)
         return;
     }
 
+    if (e->mNodeType == NodeType::cTernaryExpr)
+    {
+        e = foldTernaryExpr(static_cast<TernaryExprNode*>(e));
+        return;
+    }
+
     // Never replace the exact occurrence that denotes a storage location.
     // E.g., s.m = 1 or a[1 + 2] = 3;
     if (e->mFlags.test(cExprIsUsedAsLValue))
@@ -239,8 +240,7 @@ void ConstFoldVisitor::foldExpr(ExpressionNode*& e)
     if (e->mFlags.test(cExprIsConstExpr))
     {
         ConstValue cv;
-        ConstEvalVisitor ev{mCtx.mAllocator};
-        if (ev.evaluate(e, cv))
+        if (mCtx.mConstEvaluator.evaluate(e, cv))
         {
             ExpressionNode* lit = makeLiteral(e, cv);
             if (lit != nullptr)
@@ -258,6 +258,42 @@ void ConstFoldVisitor::foldExpr(ExpressionNode*& e)
 
     // If we didn't replace anything, recurse normally.
     visit(e);
+}
+
+ExpressionNode* ConstFoldVisitor::foldTernaryExpr(TernaryExprNode* node)
+{
+    // If the condition is constant, replace the ternary with the selected branch.
+    // The branch itself doesn't have to be constant or representable as a literal.
+    foldExpr(node->mCondition);
+    if (node->mCondition->mFlags.test(cExprIsConstExpr))
+    {
+        ConstValue condition;
+        mCtx.mConstEvaluator.evaluate(node->mCondition, condition);
+
+        // The other branch is dropped, so we only evaluate one.
+        ExpressionNode* selected = condition.as.mBool ? node->mThenExpr : node->mElseExpr;
+        foldExpr(selected);
+
+        if (node->mResolvedType->mKind == TypeKind::cStruct)
+        {
+            // If we have something like (true) ? a : b for structs:
+            // We need to "fake" a temporary for that so that (true ? a : b).inc() operates on a temporary.
+            // We do that by inserting an implicit cast, which then treats that as temporary expressions.
+            auto* value = mCtx.allocate<ImplicitCastNode>(node->mSourceRange, selected);
+            value->mResolvedType = node->mResolvedType;
+            value->mFlags = node->mFlags;
+            value->mFlags.set(cExprIsConstExpr, selected->mFlags.test(cExprIsConstExpr));
+            return value;
+        }
+
+        return selected;
+    }
+
+    // Otherwise, either branch may execute, so fold both.
+    foldExpr(node->mThenExpr);
+    foldExpr(node->mElseExpr);
+
+    return node;
 }
 
 ExpressionNode* ConstFoldVisitor::makeLiteral(ExpressionNode* src, const ConstValue& cv) const

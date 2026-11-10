@@ -20,6 +20,7 @@
 #include "parser/parsercontext.h"
 #include "parser/tokenizer.h"
 #include "sema/passes/captureanalysisvisitor.h"
+#include "sema/passes/constanalysisvisitor.h"
 #include "sema/passes/constfoldvisitor.h"
 #include "sema/passes/declcollectorvisitor.h"
 #include "sema/passes/implicitthisvisitor.h"
@@ -92,6 +93,11 @@ bool FrontendDriver::run()
     }
 
     if (processAllToStage(ModuleStage::cTypesChecked) == false)
+    {
+        return false;
+    }
+
+    if (processAllToStage(ModuleStage::cConstsAnalyzed) == false)
     {
         return false;
     }
@@ -335,6 +341,22 @@ bool FrontendDriver::doCaptureAnalysis(ModuleEntry* module)
     return phase.finish(true);
 }
 
+bool FrontendDriver::doConstAnalysis(ModuleEntry* module)
+{
+    static constexpr const char* cPhaseName = "Analyzing constants";
+
+    auto phase = mCtx.mLog.getPhaseLogger(cPhaseName);
+
+    ConstAnalysisVisitor visitor{mCtx};
+    if (visitor.run(module->mAST) == false)
+    {
+        return phase.finish(false);
+    }
+
+    module->mStage = ModuleStage::cConstsAnalyzed;
+    return phase.finish(true);
+}
+
 bool FrontendDriver::doConstFolding(ModuleEntry* module)
 {
     static constexpr const char* cPhaseName = "Folding constants";
@@ -440,6 +462,14 @@ bool FrontendDriver::processToStage(ModuleEntry* module, ModuleStage target)
             }
             case ModuleStage::cTypesChecked:
             {
+                if (doConstAnalysis(module) == false)
+                {
+                    return false;
+                }
+                break;
+            }
+            case ModuleStage::cConstsAnalyzed:
+            {
                 if (doConstFolding(module) == false)
                 {
                     return false;
@@ -468,14 +498,25 @@ bool FrontendDriver::processAllToStage(ModuleStage target)
 
         // Now the tricky part here is that the module list can change during processing.
         // Thus, we check for .size() so we can detect newer modules.
+        bool success = true;
         usize next = 0;
         while (next < modules.size())
         {
             if (processToStage(modules[next].get(), nextStage) == false)
             {
-                return false;
+                // Analyze every module so a failed constant dependency is diagnosed at its declaration too.
+                if (nextStage != ModuleStage::cConstsAnalyzed)
+                {
+                    return false;
+                }
+                success = false;
             }
             ++next;
+        }
+
+        if (success == false)
+        {
+            return false;
         }
 
         currentStage = nextStage;

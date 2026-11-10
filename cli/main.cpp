@@ -113,7 +113,7 @@ void printUsage(simlang::TextWriter& out)
     out.writeLine("  --dump PATH                Write a bytecode dump using the default dump options.");
     out.writeLine("  --check                    Compile only; do not run the program.");
     out.writeLine("  --run                      Run the program after compiling. This is the default.");
-    out.writeLine("  --no-optimize              Disable bytecode optimization.");
+    out.writeLine("  --no-optimize              Disable backend optimizations.");
     out.writeLine("  --quiet                    Suppress the compilation summary.");
     out.writeLine("  --time                     Print VM execution time to stderr.");
     out.writeLine("  --runtime-errors MODE      Runtime error mode: halt or continue. Default: continue.");
