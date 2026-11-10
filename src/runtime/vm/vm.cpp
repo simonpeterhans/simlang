@@ -3517,6 +3517,56 @@ bool VM::run()
 
         VM_END_OP();
     }
+    VM_OP(ListResize)
+    {
+        // Code:  ListResize(size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, length, list, ...] -> [...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The fill value starts at the first value word.
+        const VMWord* fill = sp - size;
+        // The list and requested length are right below the fill value words.
+        VMWord* input = sp - size - 2U;
+        VMWord list = input[0];
+        i32 lengthSigned = static_cast<i32>(input[1]);
+
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+
+        // If we have a negative length, that's an error.
+        if (lengthSigned < 0)
+        {
+            sp = input;
+            reportRuntimeError(address, RuntimeErrorKind::cNegativeListSize, lengthSigned);
+            VM_END_OP_CHECKED();
+        }
+
+        // Keep both the list and the fill value live if capacity growth triggers GC.
+        STACK_SYNC();
+
+        // Make sure the list has the requested capacity.
+        u32 length = static_cast<u32>(lengthSigned);
+        ListBlock block;
+        if (getCheckedListBlock(list, block, address) == false ||
+            ensureListCapacity(list, block, length, address) == false)
+        {
+            sp = input;
+            VM_END_OP_CHECKED();
+        }
+
+        // Fill only the newly added elements, leaving the existing prefix unchanged.
+        // Capacity growth re-resolves the list block; the fill value stays on the VM stack.
+        for (u32 i = block.mHeader->mLength; i < length; ++i)
+        {
+            copyWords(block.getElement(i), fill, size);
+        }
+        // Shrinking retains capacity; GC only scans elements below the new logical length.
+        block.mHeader->mLength = length;
+
+        // Pop the list, requested length, and N fill value words.
+        sp = input;
+
+        VM_END_OP();
+    }
     VM_OP(MapGetKeys)
     {
         // Code:  MapGetKeys()
@@ -3615,6 +3665,58 @@ bool VM::run()
         }
 
         // If we found the key, push 1, otherwise 0.
+        result[0] = found ? 1U : 0U;
+
+        // Pop the key words (the map address was replaced with the result).
+        sp = result + 1;
+
+        VM_END_OP();
+    }
+    VM_OP(MapTryGet)
+    {
+        // Code:  MapTryGet(index: MapAccessIdx)
+        // Stack: [output address, key words, map, ...] -> [bool, ...]
+        const MapAccessInfo& access = mImage.mMapAccessInfos[readPC<MapAccessIdx>(pc)];
+        // The result goes where the map address currently is.
+        VMWord* result = sp - 2U - access.mKeyWords;
+        // Get map and key.
+        VMWord map = result[0];
+        const VMWord* key = result + 1;
+        // The output storage address is on top of the stack.
+        VMWord outputAddress = sp[-1];
+
+        // Look up the block from the map handle, and then try to find the key.
+        MapBlock block;
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        u32 hash = 0;
+        u32 index = 0;
+        bool found = false;
+        if (getCheckedMapBlock(map, block, address) == false ||
+            hashMapKey(block.getKeyTypeID(), key, address, hash) == false ||
+            findMapEntry(block, key, hash, address, index, found) == false)
+        {
+            result[0] = VMWord{};
+            sp = result + 1;
+            VM_END_OP_CHECKED();
+        }
+
+        // Only resolve and write the output if we found the key.
+        if (found)
+        {
+            // The output can refer to stack, global, or heap storage.
+            VMWord* output = resolveRef(outputAddress);
+            if (output == nullptr)
+            {
+                reportReferenceRuntimeError(address, outputAddress);
+                result[0] = VMWord{};
+                sp = result + 1;
+                VM_END_OP_CHECKED();
+            }
+            // Copy the complete stored value into the caller's output.
+            copyWords(output, block.getValue(index), access.mValueWords);
+        }
+
+        // Write the result.
         result[0] = found ? 1U : 0U;
 
         // Pop the key words (the map address was replaced with the result).

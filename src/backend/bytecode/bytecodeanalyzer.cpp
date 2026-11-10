@@ -335,6 +335,11 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             return popStackWords(height, static_cast<u32>(op.as.mListInsert.mSize) + 2U);
         }
 
+        case OpCode::cListResize:
+        {
+            return popStackWords(height, static_cast<u32>(op.as.mListResize.mSize) + 2U);
+        }
+
         case OpCode::cListClear:
         case OpCode::cMapClear:
         {
@@ -513,6 +518,12 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
         {
             const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mMapContainsKey.mIndex];
             return replaceStackWords(height, 1U + access.mKeyWords, 1);
+        }
+
+        case OpCode::cMapTryGet:
+        {
+            const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mMapTryGet.mIndex];
+            return replaceStackWords(height, 2U + access.mKeyWords, 1);
         }
 
         case OpCode::cMapRemove:

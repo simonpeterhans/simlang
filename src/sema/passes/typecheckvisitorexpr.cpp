@@ -605,6 +605,12 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
             returnType = voidType;
             params.push_back(FunctionParam{intType, false});
         }
+        else if (identifierEquals(node->mMember, "resize"))
+        {
+            returnType = voidType;
+            params.push_back(FunctionParam{intType, false});
+            params.push_back(FunctionParam{listType->mElement, false});
+        }
         else
         {
             mCtx.report<cMemberNotFound>(node->mReceiver->mSourceRange, typeToString(receiverType), node->mMember);
@@ -659,6 +665,12 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
         {
             returnType = boolType;
             params.push_back(FunctionParam{mapType->mKey, false});
+        }
+        else if (identifierEquals(node->mMember, "tryGet"))
+        {
+            returnType = boolType;
+            params.push_back(FunctionParam{mapType->mKey, false});
+            params.push_back(FunctionParam{mapType->mValue, true});
         }
         else if (identifierEquals(node->mMember, "get"))
         {

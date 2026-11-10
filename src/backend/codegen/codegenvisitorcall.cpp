@@ -254,6 +254,18 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
         return true;
     }
 
+    if (identifierEquals(memberAccess->mMember, "resize"))
+    {
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
+            visit(node->mArgs[1].mValue) == false)
+        {
+            return false;
+        }
+
+        emit<OpCode::cListResize>(static_cast<OpWordCount>(elementWords));
+        return true;
+    }
+
     return false;
 }
 
@@ -326,6 +338,18 @@ bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode*
 
         // Here, we are only interested in the key and so we don't have a value field offset or value words.
         emit<OpCode::cMapContainsKey>(getMapAccessIndex(mapType, 0, 0));
+        return true;
+    }
+
+    if (identifierEquals(memberAccess->mMember, "tryGet"))
+    {
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
+            emitAddress(node->mArgs[1].mValue, AddressMode::cStorage) == false)
+        {
+            return false;
+        }
+
+        emit<OpCode::cMapTryGet>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
         return true;
     }
 

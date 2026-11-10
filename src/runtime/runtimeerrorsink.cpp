@@ -61,6 +61,7 @@ void TextRuntimeErrorSink::reportRuntimeError(const RuntimeError& error, const E
             break;
         }
         case RuntimeErrorKind::cNegativeListCapacity:
+        case RuntimeErrorKind::cNegativeListSize:
         case RuntimeErrorKind::cNegativeMapCapacity:
         {
             out << " (" << error.mValue0 << ")";

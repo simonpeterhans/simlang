@@ -581,6 +581,11 @@ void BytecodeDump::writeOperandList(const Op& op)
                 writeMapAccessIndex(op.as.mMapContainsKey.mIndex);
                 return;
             }
+            case OpCode::cMapTryGet:
+            {
+                writeMapAccessIndex(op.as.mMapTryGet.mIndex);
+                return;
+            }
             case OpCode::cMapRemove:
             {
                 writeMapAccessIndex(op.as.mMapRemove.mIndex);

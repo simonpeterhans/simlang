@@ -77,12 +77,14 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cListContains:
         case OpCode::cListClear:
         case OpCode::cListReserve:
+        case OpCode::cListResize:
         case OpCode::cMapGetKeys:
         case OpCode::cMapGetValues:
         case OpCode::cMapSize:
         case OpCode::cMapIsEmpty:
         case OpCode::cMapClear:
         case OpCode::cMapContainsKey:
+        case OpCode::cMapTryGet:
         case OpCode::cMapRemove:
         case OpCode::cMapReserve:
         case OpCode::cNewObject:

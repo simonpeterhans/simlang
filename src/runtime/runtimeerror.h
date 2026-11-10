@@ -21,6 +21,7 @@ enum class RuntimeErrorKind : u8
     cInvalidReference,
     cIndexOutOfBounds,
     cNegativeListCapacity,
+    cNegativeListSize,
     cNegativeMapCapacity,
     cMissingMapKey,
     cAllocationFailed,
@@ -51,6 +52,7 @@ constexpr const char* runtimeErrorKindToString(RuntimeErrorKind kind)
         case RuntimeErrorKind::cInvalidReference: return "invalid reference";
         case RuntimeErrorKind::cIndexOutOfBounds: return "index out of bounds";
         case RuntimeErrorKind::cNegativeListCapacity: return "negative list capacity";
+        case RuntimeErrorKind::cNegativeListSize: return "negative list size";
         case RuntimeErrorKind::cNegativeMapCapacity: return "negative map capacity";
         case RuntimeErrorKind::cMissingMapKey: return "missing map key";
         case RuntimeErrorKind::cAllocationFailed: return "allocation failed";
