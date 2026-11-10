@@ -217,6 +217,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
             return false;
         }
 
+        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
         emit<OpCode::cListIndexOf>(static_cast<OpWordCount>(elementWords));
         return true;
     }
@@ -228,6 +229,7 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
             return false;
         }
 
+        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
         emit<OpCode::cListContains>(static_cast<OpWordCount>(elementWords));
         return true;
     }

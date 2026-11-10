@@ -92,20 +92,6 @@ static bool cmpWords(const VMWord* lhs, const VMWord* rhs, u32 wordCount)
     }
 }
 
-static i32 findListElement(const ListBlock& block, const VMWord* value)
-{
-    u32 elementWords = block.getElementWords();
-    for (u32 i = 0; i < block.mHeader->mLength; ++i)
-    {
-        if (cmpWords(block.getElement(i), value, elementWords))
-        {
-            return static_cast<i32>(i);
-        }
-    }
-
-    return -1;
-}
-
 static VMWord offsetRefAddress(VMWord base, u32 wordOffset)
 {
     if (isHeapAddress(base))
@@ -430,6 +416,80 @@ bool VM::ensureListCapacity(VMWord handle, ListBlock& block, u32 minCapacity, VM
     }
 
     return true;
+}
+
+bool VM::findListElement(const ListBlock& block, const VMWord* value, VMAddress address, i32& outIndex)
+{
+    outIndex = -1;
+    if (block.mHeader->mLength == 0)
+    {
+        return true;
+    }
+
+    // Choose the comparator once, then scan until the first equal element or an error.
+    auto find = [&](auto compare) -> bool
+    {
+        for (u32 i = 0; i < block.mHeader->mLength; ++i)
+        {
+            bool equal = false;
+            if (compare(block.getElement(i), equal) == false)
+            {
+                return false;
+            }
+            if (equal)
+            {
+                outIndex = static_cast<i32>(i);
+                return true;
+            }
+        }
+        return true;
+    };
+
+    // If we only have 1 op (e.g. struct with 1 member or a class), do a shortcut.
+    const KeyOps& ops = mImage.mKeyOpsTable.getOps(block.getElementTypeID());
+    if (ops.mOpCount == 1)
+    {
+        const KeyOp& op = mImage.mKeyOpsTable.getOp(ops.mFirstOp);
+        switch (op.mKind)
+        {
+            case KeyOpKind::cWordSpan:
+            {
+                return find(
+                    [&](const VMWord* element, bool& equal)
+                    {
+                        // If we have a word span, we can directly compare the words.
+                        equal = cmpWords(element + op.mOffset, value + op.mOffset, op.mWordCount);
+                        return true;
+                    });
+            }
+            case KeyOpKind::cFloat:
+            {
+                return find(
+                    [&](const VMWord* element, bool& equal)
+                    {
+                        // Reinterpret the words as floats and compare numerically.
+                        equal = bits::bitCast<f32>(element[op.mOffset]) == bits::bitCast<f32>(value[op.mOffset]);
+                        return true;
+                    });
+            }
+            case KeyOpKind::cString:
+            {
+                return find(
+                    [&](const VMWord* element, bool& equal)
+                    {
+                        // Strings require a bit more effort to be checked since we're comparing the values.
+                        return stringsEqualChecked(element[op.mOffset], value[op.mOffset], address, equal);
+                    });
+            }
+        }
+    }
+
+    // Otherwise, do the full value equal based on the ops that we have.
+    return find(
+        [&](const VMWord* element, bool& equal)
+        {
+            return valuesEqual(ops, element, value, address, equal);
+        });
 }
 
 bool VM::getListSize(VMWord handle, u32& outSize)
@@ -759,13 +819,15 @@ bool VM::hashMapKey(TypeID keyTypeID, const VMWord* key, VMAddress address, u32&
             }
         }
     }
+
     outHash = mixHash32(hash) & cMapHashMask;
+
     return true;
 }
 
-bool VM::mapKeysEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out)
+bool VM::valuesEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out)
 {
-    // Here, we compare the keys for equality.
+    // Compare flattened values according to their typed equality operations.
     out = false;
 
     // Go over all the operations that we have.
@@ -786,7 +848,7 @@ bool VM::mapKeysEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, V
             }
             case KeyOpKind::cFloat:
             {
-                // If we have a float, reinterpret that and compare the bits.
+                // Reinterpret the words as floats and compare numerically.
                 equal = bits::bitCast<f32>(*lhsField) == bits::bitCast<f32>(*rhsField);
                 break;
             }
@@ -918,7 +980,7 @@ bool VM::findMapEntry(const MapBlock& block,
         hash,
         [&](const VMWord* entryKey, bool& equal)
         {
-            return mapKeysEqual(ops, entryKey, key, address, equal);
+            return valuesEqual(ops, entryKey, key, address, equal);
         },
         outIndex,
         outFound);
@@ -3421,8 +3483,12 @@ bool VM::run()
         // The list is right below the value words.
         VMWord list = value[-1];
 
+        // Get the list and find the first element equal to the search value.
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        i32 index = -1;
         ListBlock block;
-        if (getCheckedListBlock(list, block, getRuntimeErrorAddress(pc, code)) == false)
+        if (getCheckedListBlock(list, block, address) == false ||
+            findListElement(block, value, address, index) == false)
         {
             result[0] = static_cast<VMWord>(-1);
             sp = value;
@@ -3430,7 +3496,7 @@ bool VM::run()
         }
 
         // Find the index and write the result.
-        result[0] = static_cast<VMWord>(findListElement(block, value));
+        result[0] = static_cast<VMWord>(index);
 
         // Pop N words.
         sp = value;
@@ -3450,8 +3516,12 @@ bool VM::run()
         // The list is right below the value words.
         VMWord list = value[-1];
 
+        // Get the list and find the first element equal to the search value.
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        i32 index = -1;
         ListBlock block;
-        if (getCheckedListBlock(list, block, getRuntimeErrorAddress(pc, code)) == false)
+        if (getCheckedListBlock(list, block, address) == false ||
+            findListElement(block, value, address, index) == false)
         {
             result[0] = VMWord{};
             sp = value;
@@ -3459,7 +3529,6 @@ bool VM::run()
         }
 
         // Do the lookup and write the result.
-        i32 index = findListElement(block, value);
         result[0] = (index >= 0 ? 1U : 0U);
 
         // Pop N words.

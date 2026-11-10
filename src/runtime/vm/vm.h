@@ -138,6 +138,8 @@ private:
     // List validation/capacity helpers.
     bool getCheckedListBlock(VMWord handle, ListBlock& out, VMAddress address);
     bool ensureListCapacity(VMWord handle, ListBlock& block, u32 minCapacity, VMAddress address);
+    bool findListElement(const ListBlock& block, const VMWord* value, VMAddress address, i32& outIndex);
+    bool valuesEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out);
 
     // List operations used by syscalls.
     bool getListSize(VMWord handle, u32& outSize);
@@ -153,7 +155,6 @@ private:
     bool getCheckedMapBlock(VMWord handle, MapBlock& out, VMAddress address);
     bool ensureMapCapacity(VMWord handle, MapBlock& block, u32 minCapacity, VMAddress address);
     bool hashMapKey(TypeID keyTypeID, const VMWord* key, VMAddress address, u32& outHash);
-    bool mapKeysEqual(const KeyOps& ops, const VMWord* lhs, const VMWord* rhs, VMAddress address, bool& out);
     bool findMapEntry(const MapBlock& block,
                       const VMWord* key,
                       u32 hash,
