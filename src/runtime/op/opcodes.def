@@ -90,6 +90,8 @@ X( ListInsert,            1,    OpWordCount,      mSize,        void,           
 X( ListRemoveAt,          1,    OpWordCount,      mSize,        void,            _2 )
 X( ListIndexOf,           1,    OpWordCount,      mSize,        void,            _2 )
 X( ListContains,          1,    OpWordCount,      mSize,        void,            _2 )
+X( ListRemove,            1,    OpWordCount,      mSize,        void,            _2 )
+X( ListRemoveAll,         1,    OpWordCount,      mSize,        void,            _2 )
 X( ListClear,             0,    void,             _1,           void,            _2 )
 X( ListReserve,           0,    void,             _1,           void,            _2 )
 X( ListResize,            1,    OpWordCount,      mSize,        void,            _2 )

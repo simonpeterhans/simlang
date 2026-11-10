@@ -3495,7 +3495,7 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        // Find the index and write the result.
+        // Write the result.
         result[0] = static_cast<VMWord>(index);
 
         // Pop N words.
@@ -3528,8 +3528,119 @@ bool VM::run()
             VM_END_OP_CHECKED();
         }
 
-        // Do the lookup and write the result.
+        // Write the result.
         result[0] = (index >= 0 ? 1U : 0U);
+
+        // Pop N words.
+        sp = value;
+
+        VM_END_OP();
+    }
+    VM_OP(ListRemove)
+    {
+        // Code:  ListRemove(size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, list, ...] -> [bool, ...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The value starts at the first value word.
+        VMWord* value = sp - size;
+        // The result overwrites the list word.
+        VMWord* result = value - 1;
+        // The list is right below the value words.
+        VMWord list = value[-1];
+
+        // Get the list and find the first element equal to the search value.
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        i32 index = -1;
+        ListBlock block;
+        if (getCheckedListBlock(list, block, address) == false ||
+            findListElement(block, value, address, index) == false)
+        {
+            result[0] = VMWord{};
+            sp = value;
+            VM_END_OP_CHECKED();
+        }
+
+        // If we found a match, remove it and shift the remaining elements to the left.
+        if (index >= 0)
+        {
+            block.removeSlot(static_cast<u32>(index));
+        }
+
+        // Write the result.
+        result[0] = index >= 0 ? 1U : 0U;
+
+        // Pop N words.
+        sp = value;
+
+        VM_END_OP();
+    }
+    VM_OP(ListRemoveAll)
+    {
+        // Code:  ListRemoveAll(size: OpWordCount)
+        // Stack: [wordN-1, ..., word0, list, ...] -> [count, ...]
+        OpWordCount size = readPC<OpWordCount>(pc);
+
+        // The value starts at the first value word.
+        VMWord* value = sp - size;
+        // The result overwrites the list word.
+        VMWord* result = value - 1;
+        // The list is right below the value words.
+        VMWord list = value[-1];
+
+        // Get the list and the typed equality operations for its elements.
+        VMAddress address = getRuntimeErrorAddress(pc, code);
+        ListBlock block;
+        if (getCheckedListBlock(list, block, address) == false)
+        {
+            result[0] = VMWord{};
+            sp = value;
+            VM_END_OP_CHECKED();
+        }
+
+        // Get the ops since we'll need them for comparison.
+        const KeyOps& ops = mImage.mKeyOpsTable.getOps(block.getElementTypeID());
+        u32 length = block.mHeader->mLength;
+        u32 elementWords = block.getElementWords();
+        u32 writeIndex = 0;
+
+        // Go over all elements, drop the ones matching the given element.
+        for (u32 readIndex = 0; readIndex < length; ++readIndex)
+        {
+            const VMWord* element = block.getElement(readIndex);
+            bool equal = false;
+            if (valuesEqual(ops, element, value, address, equal) == false)
+            {
+                if (mHalted)
+                {
+                    break;
+                }
+
+                // Keep this element if its comparison failed, then process the rest.
+                equal = false;
+            }
+
+            // If we are NOT matching, we keep this element.
+            // We may have to move it forward one or multiple positions, which is tracked by writeIndex.
+            if (equal == false)
+            {
+                copyWords(block.getElement(writeIndex), element, elementWords);
+                // We're keeping this one, so we have one element more and advance the index.
+                ++writeIndex;
+            }
+        }
+
+        // If we halted, bail.
+        if (mHalted)
+        {
+            result[0] = VMWord{};
+            sp = value;
+            VM_END_OP_CHECKED();
+        }
+
+        // Update the length and how many elements were removed.
+        block.mHeader->mLength = writeIndex;
+        result[0] = length - writeIndex;
 
         // Pop N words.
         sp = value;

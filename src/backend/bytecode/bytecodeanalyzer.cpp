@@ -514,6 +514,16 @@ bool BytecodeAnalyzer::applyStackEffect(const Op& op, u32& height) const
             return replaceStackWords(height, static_cast<u32>(op.as.mListContains.mSize) + 1U, 1);
         }
 
+        case OpCode::cListRemove:
+        {
+            return replaceStackWords(height, static_cast<u32>(op.as.mListRemove.mSize) + 1U, 1);
+        }
+
+        case OpCode::cListRemoveAll:
+        {
+            return replaceStackWords(height, static_cast<u32>(op.as.mListRemoveAll.mSize) + 1U, 1);
+        }
+
         case OpCode::cMapContainsKey:
         {
             const MapAccessInfo& access = mBackend.mMapAccessInfos[op.as.mMapContainsKey.mIndex];

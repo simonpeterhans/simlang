@@ -75,6 +75,8 @@ static bool canOpReportRuntimeError(OpCode opCode)
         case OpCode::cListRemoveAt:
         case OpCode::cListIndexOf:
         case OpCode::cListContains:
+        case OpCode::cListRemove:
+        case OpCode::cListRemoveAll:
         case OpCode::cListClear:
         case OpCode::cListReserve:
         case OpCode::cListResize:

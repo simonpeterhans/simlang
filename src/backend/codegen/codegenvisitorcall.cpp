@@ -234,6 +234,30 @@ bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode
         return true;
     }
 
+    if (identifierEquals(memberAccess->mMember, "remove"))
+    {
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
+        {
+            return false;
+        }
+
+        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+        emit<OpCode::cListRemove>(static_cast<OpWordCount>(elementWords));
+        return true;
+    }
+
+    if (identifierEquals(memberAccess->mMember, "removeAll"))
+    {
+        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
+        {
+            return false;
+        }
+
+        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+        emit<OpCode::cListRemoveAll>(static_cast<OpWordCount>(elementWords));
+        return true;
+    }
+
     if (identifierEquals(memberAccess->mMember, "clear"))
     {
         if (visit(memberAccess->mReceiver) == false)

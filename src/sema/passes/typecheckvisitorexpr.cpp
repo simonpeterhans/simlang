@@ -596,6 +596,16 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
             returnType = boolType;
             params.push_back(FunctionParam{listType->mElement, false});
         }
+        else if (identifierEquals(node->mMember, "remove"))
+        {
+            returnType = boolType;
+            params.push_back(FunctionParam{listType->mElement, false});
+        }
+        else if (identifierEquals(node->mMember, "removeAll"))
+        {
+            returnType = intType;
+            params.push_back(FunctionParam{listType->mElement, false});
+        }
         else if (identifierEquals(node->mMember, "clear"))
         {
             returnType = voidType;
