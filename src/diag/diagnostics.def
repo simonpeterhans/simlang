@@ -55,7 +55,7 @@ X( cInvalidPrivateTarget,                 cError,   "Invalid private declaration
 X( cPrivateInterfaceMember,               cError,   "Invalid private member.",                 "Interface members cannot be private." )
 X( cDuplicateImplSpecifier,               cWarning, "Duplicate 'impl' specifier.",             "'impl' specified multiple times; duplicate ignored." )
 X( cInvalidImplTarget,                    cError,   "Invalid impl.",                           "'impl' can only be applied to class methods." )
-X( cInvalidImplClause,                    cError,   "Invalid impl.",                           "'impl' interface clauses are only allowed on class declarations." )
+X( cInvalidInterfaceClause,               cError,   "Invalid interface clause.",               "Interface clauses are only allowed on class declarations." )
 
 // Declaration, import, resolution.
 X( cInvalidTypeDeclarationScope,          cError,   "Type declaration in invalid scope.",      "Struct or class '{}' must be declared on the top level." )

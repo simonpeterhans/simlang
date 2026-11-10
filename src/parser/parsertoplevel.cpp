@@ -350,13 +350,13 @@ StatementNode* Parser::parseTypeDeclaration()
         return nullptr;
     }
 
-    if (isInterface == false && getCurrentTokenType() == TokenType::cImpl)
+    if (getCurrentTokenType() == TokenType::cColon)
     {
-        Token implToken = consume();
+        Token colonToken = consume();
         const bool keepDeclaredInterfaces = isClass;
         if (isClass == false)
         {
-            mCtx.report<cInvalidImplClause>(implToken.getRange());
+            mCtx.report<cInvalidInterfaceClause>(colonToken.getRange());
         }
 
         while (true)
