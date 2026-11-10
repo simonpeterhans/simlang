@@ -236,8 +236,8 @@ void ConstFoldVisitor::foldExpr(ExpressionNode*& e)
         }
     }
 
-    // Replace any constexpr rvalue with a literal.
-    if (e->mFlags.test(cExprIsConstExpr))
+    // Only compute values this pass can replace with a literal, otherwise visit their children below.
+    if (e->mFlags.test(cExprIsConstExpr) && canMakeLiteral(e->mResolvedType))
     {
         ConstValue cv;
         if (mCtx.mConstEvaluator.evaluate(e, cv))
@@ -294,6 +294,26 @@ ExpressionNode* ConstFoldVisitor::foldTernaryExpr(TernaryExprNode* node)
     foldExpr(node->mElseExpr);
 
     return node;
+}
+
+bool ConstFoldVisitor::canMakeLiteral(const Type* type)
+{
+    // We currently have no literal representation of structs.
+    switch (type->mKind)
+    {
+        case TypeKind::cPrimitive:
+        case TypeKind::cNull:
+        case TypeKind::cClass:
+        case TypeKind::cList:
+        case TypeKind::cMap:
+        {
+            return true;
+        }
+        default:
+        {
+            return false;
+        }
+    }
 }
 
 ExpressionNode* ConstFoldVisitor::makeLiteral(ExpressionNode* src, const ConstValue& cv) const

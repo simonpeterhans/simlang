@@ -23,7 +23,6 @@ public:
     bool visitIdentifier(IdentifierNode* node);
     bool visitStringLiteral(StringLiteralNode* node);
     bool visitFormatString(FormatStringNode* node);
-    bool visitNewObject(NewObjectNode* node);
 
     // Statements.
     bool visitTypeDeclarationStatement(TypeDeclarationStatementNode* node);

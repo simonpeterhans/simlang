@@ -7,6 +7,7 @@ namespace simlang
 
 struct CompilerContext;
 struct ConstValue;
+struct Type;
 
 class ConstFoldVisitor : public ASTWalker<ConstFoldVisitor>
 {
@@ -41,6 +42,7 @@ public:
 private:
     void foldExpr(ExpressionNode*& e);
     ExpressionNode* foldTernaryExpr(TernaryExprNode* node);
+    static bool canMakeLiteral(const Type* type);
     ExpressionNode* makeLiteral(ExpressionNode* src, const ConstValue& cv) const;
 
     CompilerContext& mCtx;

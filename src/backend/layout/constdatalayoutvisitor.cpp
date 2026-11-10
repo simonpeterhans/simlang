@@ -232,7 +232,7 @@ bool ConstDataLayoutVisitor::visitIdentifier(IdentifierNode* node)
 
 bool ConstDataLayoutVisitor::visitStringLiteral(StringLiteralNode* node)
 {
-    // Register any string literals.
+    // Constant evaluation forwards existing strings from literals and symbols.
     addStringLiteral(node->mString);
     return true;
 }
@@ -269,23 +269,9 @@ bool ConstDataLayoutVisitor::visitFormatString(FormatStringNode* node)
     return true;
 }
 
-bool ConstDataLayoutVisitor::visitNewObject(NewObjectNode* node)
-{
-    // If we have a new expression that is a const expr, evaluate it and emit the strings.
-    // (They are the only thing we need to lay out here.)
-    if (node->mFlags.test(cExprIsConstExpr))
-    {
-        ConstValue value;
-        mCtx.mConstEvaluator.evaluate(node, value);
-        registerConstValueStrings(value);
-    }
-
-    return ASTWalker::visitNewObject(node);
-}
-
 bool ConstDataLayoutVisitor::visitTypeDeclarationStatement(TypeDeclarationStatementNode* node)
 {
-    // If this type is a template declaration, ignore it -- we only process instantiated templates.
+    // If this type is a template declaration, ignore it, we only process instantiated templates.
     if (node->isTemplate())
     {
         return true;
