@@ -14,6 +14,7 @@
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
 #include "symbol/symbolutils.h"
+#include "type/collectionmethods.h"
 #include "type/typeformat.h"
 #include "type/typekind.h"
 #include "type/types.h"
@@ -524,6 +525,8 @@ bool TypeCheckVisitor::visitIndexCall(IndexCallNode* node)
 
 bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
 {
+    node->mCollectionMethod = CollectionMethod::cNone;
+
     // Always resolve the receiver.
     if (visit(node->mReceiver) == false)
     {
@@ -539,96 +542,17 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
     // The receiver has to be a struct, class, interface, or built-in container type.
     Type* receiverType = node->mReceiver->mResolvedType;
 
-    // Handle list member access.
-    if (receiverType->mKind == TypeKind::cList)
+    // Resolve built-in collection method names once, then construct their typed signatures.
+    if (receiverType->mKind == TypeKind::cList || receiverType->mKind == TypeKind::cMap)
     {
-        auto* listType = static_cast<ListType*>(receiverType);
-        Type* voidType = mCtx.mTypes.getVoidType();
-        Type* intType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
-        Type* boolType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
-        Type* returnType = nullptr;
-        std::vector<FunctionParam> params;
-
-        if (identifierEquals(node->mMember, "size"))
-        {
-            returnType = intType;
-        }
-        else if (identifierEquals(node->mMember, "isEmpty"))
-        {
-            returnType = boolType;
-        }
-        else if (identifierEquals(node->mMember, "add") || identifierEquals(node->mMember, "push"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "addList"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{receiverType, false});
-        }
-        else if (identifierEquals(node->mMember, "pop"))
-        {
-            returnType = listType->mElement;
-        }
-        else if (identifierEquals(node->mMember, "back"))
-        {
-            returnType = listType->mElement;
-        }
-        else if (identifierEquals(node->mMember, "insertAt"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{intType, false});
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "removeAt"))
-        {
-            returnType = listType->mElement;
-            params.push_back(FunctionParam{intType, false});
-        }
-        else if (identifierEquals(node->mMember, "indexOf"))
-        {
-            returnType = intType;
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "contains"))
-        {
-            returnType = boolType;
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "remove"))
-        {
-            returnType = boolType;
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "removeAll"))
-        {
-            returnType = intType;
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else if (identifierEquals(node->mMember, "clear"))
-        {
-            returnType = voidType;
-        }
-        else if (identifierEquals(node->mMember, "reserve"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{intType, false});
-        }
-        else if (identifierEquals(node->mMember, "resize"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{intType, false});
-            params.push_back(FunctionParam{listType->mElement, false});
-        }
-        else
+        CollectionMethod method = findCollectionMethod(receiverType->mKind, node->mMember);
+        if (method == CollectionMethod::cNone)
         {
             mCtx.report<cMemberNotFound>(node->mReceiver->mSourceRange, typeToString(receiverType), node->mMember);
             markError(node);
             return true;
         }
 
-        // All of these are calls.
         if (mDirectCallReceiver != node)
         {
             mCtx.report<cMethodAccessWithoutCall>(node->mSourceRange, node->mMember, typeToString(receiverType));
@@ -636,90 +560,8 @@ bool TypeCheckVisitor::visitMemberAccess(MemberAccessNode* node)
             return true;
         }
 
-        node->mResolvedType = mCtx.mTypes.getOrAddFunction(returnType, params);
-
-        return true;
-    }
-
-    // Handle map member access.
-    if (receiverType->mKind == TypeKind::cMap)
-    {
-        auto* mapType = static_cast<MapType*>(receiverType);
-        Type* voidType = mCtx.mTypes.getVoidType();
-        Type* intType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cInt);
-        Type* boolType = mCtx.mTypes.getPrimitiveType(PrimitiveTypeKind::cBool);
-        Type* returnType = nullptr;
-        std::vector<FunctionParam> params;
-
-        if (identifierEquals(node->mMember, "getKeys"))
-        {
-            returnType = mCtx.mTypes.getOrAddList(mapType->mKey);
-        }
-        else if (identifierEquals(node->mMember, "getValues"))
-        {
-            returnType = mCtx.mTypes.getOrAddList(mapType->mValue);
-        }
-        else if (identifierEquals(node->mMember, "size"))
-        {
-            returnType = intType;
-        }
-        else if (identifierEquals(node->mMember, "isEmpty"))
-        {
-            returnType = boolType;
-        }
-        else if (identifierEquals(node->mMember, "clear"))
-        {
-            returnType = voidType;
-        }
-        else if (identifierEquals(node->mMember, "containsKey"))
-        {
-            returnType = boolType;
-            params.push_back(FunctionParam{mapType->mKey, false});
-        }
-        else if (identifierEquals(node->mMember, "tryGet"))
-        {
-            returnType = boolType;
-            params.push_back(FunctionParam{mapType->mKey, false});
-            params.push_back(FunctionParam{mapType->mValue, true});
-        }
-        else if (identifierEquals(node->mMember, "get"))
-        {
-            returnType = mapType->mValue;
-            params.push_back(FunctionParam{mapType->mKey, false});
-        }
-        else if (identifierEquals(node->mMember, "set"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{mapType->mKey, false});
-            params.push_back(FunctionParam{mapType->mValue, false});
-        }
-        else if (identifierEquals(node->mMember, "remove"))
-        {
-            returnType = boolType;
-            params.push_back(FunctionParam{mapType->mKey, false});
-        }
-        else if (identifierEquals(node->mMember, "reserve"))
-        {
-            returnType = voidType;
-            params.push_back(FunctionParam{intType, false});
-        }
-        else
-        {
-            mCtx.report<cMemberNotFound>(node->mReceiver->mSourceRange, typeToString(receiverType), node->mMember);
-            markError(node);
-            return true;
-        }
-
-        // All of these are calls.
-        if (mDirectCallReceiver != node)
-        {
-            mCtx.report<cMethodAccessWithoutCall>(node->mSourceRange, node->mMember, typeToString(receiverType));
-            markError(node);
-            return true;
-        }
-
-        node->mResolvedType = mCtx.mTypes.getOrAddFunction(returnType, params);
-
+        node->mCollectionMethod = method;
+        node->mResolvedType = getCollectionMethodType(mCtx.mTypes, receiverType, method);
         return true;
     }
 

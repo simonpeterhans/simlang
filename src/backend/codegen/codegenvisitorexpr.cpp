@@ -465,14 +465,9 @@ bool CodeGenVisitor::visitFunctionCall(FunctionCallNode* node)
     if (node->mReceiver->mNodeType == NodeType::cMemberAccess)
     {
         auto* memberAccess = static_cast<MemberAccessNode*>(node->mReceiver);
-        if (memberAccess->mReceiver->mResolvedType->mKind == TypeKind::cList)
+        if (memberAccess->mCollectionMethod != CollectionMethod::cNone)
         {
-            return emitListMethodCall(node, memberAccess);
-        }
-
-        if (memberAccess->mReceiver->mResolvedType->mKind == TypeKind::cMap)
-        {
-            return emitMapMethodCall(node, memberAccess);
+            return emitCollectionMethodCall(node, memberAccess);
         }
 
         // If this is a normal function, emit a direct call.

@@ -184,6 +184,8 @@ target_sources(simlang PRIVATE
         symbol/symbolregistry.h
         symbol/symboltype.h
         symbol/symbolutils.h
+        type/collectionmethods.cpp
+        type/collectionmethods.h
         type/typeformat.cpp
         type/typeformat.h
         type/typekind.h

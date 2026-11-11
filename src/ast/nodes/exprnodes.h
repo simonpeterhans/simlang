@@ -3,6 +3,7 @@
 #include "ast/binaryop.h"
 #include "ast/nodes/astnode.h"
 #include "ast/unaryop.h"
+#include "type/collectionmethods.h"
 #include "util/arrayview.h"
 #include "util/types.h"
 
@@ -260,6 +261,9 @@ struct MemberAccessNode : ExpressionNode
 
     // Resolved symbol for the member.
     Symbol* mSymbol = nullptr;
+
+    // Resolved built-in collection method; user-defined members use mSymbol.
+    CollectionMethod mCollectionMethod = CollectionMethod::cNone;
 };
 
 struct ModuleAccessNode : ExpressionNode

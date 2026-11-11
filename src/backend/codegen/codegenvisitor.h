@@ -170,8 +170,7 @@ private:
     bool emitCallArguments(ArrayView<CallArgument> args, const FunctionType* funcType);
     bool emitMethodReceiver(MemberAccessNode* memberAccess);
     bool emitInterfaceMethodDispatch(MemberAccessNode* memberAccess, const FunctionType* funcType);
-    bool emitListMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
-    bool emitMapMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
+    bool emitCollectionMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess);
     bool emitFreeFunctionOrSyscallCall(FunctionCallNode* node);
     bool emitIndirectFunctionCall(FunctionCallNode* node);

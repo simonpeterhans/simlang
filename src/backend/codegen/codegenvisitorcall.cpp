@@ -9,9 +9,11 @@
 #include "symbol/identifier.h"
 #include "symbol/symbol.h"
 #include "symbol/symboltype.h"
+#include "type/collectionmethods.h"
 #include "type/typekind.h"
 #include "type/types.h"
 #include "util/arrayview.h"
+#include "util/asserts.h"
 #include "util/types.h"
 
 namespace simlang
@@ -116,315 +118,83 @@ bool CodeGenVisitor::emitInterfaceMethodDispatch(MemberAccessNode* memberAccess,
     return true;
 }
 
-bool CodeGenVisitor::emitListMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess)
+bool CodeGenVisitor::emitCollectionMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess)
 {
-    auto* listType = static_cast<ListType*>(memberAccess->mReceiver->mResolvedType);
-    u32 elementWords = layout::getWordSizeForType(listType->mElement);
+    SIMLANG_ASSERT(memberAccess->mCollectionMethod != CollectionMethod::cNone);
+    auto* funcType = static_cast<FunctionType*>(memberAccess->mResolvedType);
 
-    if (identifierEquals(memberAccess->mMember, "size"))
+    if (visit(memberAccess->mReceiver) == false || emitCallArguments(node->mArgs, funcType) == false)
     {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListSize>();
-        return true;
+        return false;
     }
 
-    if (identifierEquals(memberAccess->mMember, "isEmpty"))
+    Type* receiverType = memberAccess->mReceiver->mResolvedType;
+    auto* listType = receiverType->mKind == TypeKind::cList ? static_cast<ListType*>(receiverType) : nullptr;
+    auto* mapType = receiverType->mKind == TypeKind::cMap ? static_cast<MapType*>(receiverType) : nullptr;
+    OpWordCount elementWords = 0;
+    OpWordCount valueWords = 0;
+    if (listType != nullptr)
     {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListIsEmpty>();
-        return true;
+        elementWords = static_cast<OpWordCount>(layout::getWordSizeForType(listType->mElement));
+    }
+    if (mapType != nullptr)
+    {
+        valueWords = static_cast<OpWordCount>(layout::getWordSizeForType(mapType->mValue));
     }
 
-    if (identifierEquals(memberAccess->mMember, "add") || identifierEquals(memberAccess->mMember, "push"))
+    switch (memberAccess->mCollectionMethod)
     {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
+        case CollectionMethod::cListSize: emit<OpCode::cListSize>(); return true;
+        case CollectionMethod::cListIsEmpty: emit<OpCode::cListIsEmpty>(); return true;
+        case CollectionMethod::cListAdd: emit<OpCode::cListPush>(elementWords); return true;
+        case CollectionMethod::cListAddList: emit<OpCode::cListAddList>(); return true;
+        case CollectionMethod::cListPop: emit<OpCode::cListPop>(elementWords); return true;
+        case CollectionMethod::cListBack: emit<OpCode::cListBack>(elementWords); return true;
+        case CollectionMethod::cListInsertAt: emit<OpCode::cListInsert>(elementWords); return true;
+        case CollectionMethod::cListRemoveAt: emit<OpCode::cListRemoveAt>(elementWords); return true;
+        case CollectionMethod::cListIndexOf:
+            mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+            emit<OpCode::cListIndexOf>(elementWords);
+            return true;
+        case CollectionMethod::cListContains:
+            mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+            emit<OpCode::cListContains>(elementWords);
+            return true;
+        case CollectionMethod::cListRemove:
+            mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+            emit<OpCode::cListRemove>(elementWords);
+            return true;
+        case CollectionMethod::cListRemoveAll:
+            mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
+            emit<OpCode::cListRemoveAll>(elementWords);
+            return true;
+        case CollectionMethod::cListClear: emit<OpCode::cListClear>(); return true;
+        case CollectionMethod::cListReserve: emit<OpCode::cListReserve>(); return true;
+        case CollectionMethod::cListResize: emit<OpCode::cListResize>(elementWords); return true;
 
-        emit<OpCode::cListPush>(static_cast<OpWordCount>(elementWords));
-        return true;
+        case CollectionMethod::cMapGetKeys: emit<OpCode::cMapGetKeys>(); return true;
+        case CollectionMethod::cMapGetValues: emit<OpCode::cMapGetValues>(); return true;
+        case CollectionMethod::cMapSize: emit<OpCode::cMapSize>(); return true;
+        case CollectionMethod::cMapIsEmpty: emit<OpCode::cMapIsEmpty>(); return true;
+        case CollectionMethod::cMapClear: emit<OpCode::cMapClear>(); return true;
+        case CollectionMethod::cMapContainsKey:
+            emit<OpCode::cMapContainsKey>(getMapAccessIndex(mapType, 0, 0));
+            return true;
+        case CollectionMethod::cMapTryGet:
+            emit<OpCode::cMapTryGet>(getMapAccessIndex(mapType, 0, valueWords));
+            return true;
+        case CollectionMethod::cMapGet:
+            emit<OpCode::cLoadMapValue>(getMapAccessIndex(mapType, 0, valueWords));
+            return true;
+        case CollectionMethod::cMapSet:
+            emit<OpCode::cStoreMapValue>(getMapAccessIndex(mapType, 0, valueWords));
+            return true;
+        case CollectionMethod::cMapRemove: emit<OpCode::cMapRemove>(getMapAccessIndex(mapType, 0, 0)); return true;
+        case CollectionMethod::cMapReserve: emit<OpCode::cMapReserve>(); return true;
+        case CollectionMethod::cNone: break;
     }
 
-    if (identifierEquals(memberAccess->mMember, "addList"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListAddList>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "pop"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListPop>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "back"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListBack>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "insertAt"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
-            visit(node->mArgs[1].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListInsert>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "removeAt"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListRemoveAt>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "indexOf"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
-        emit<OpCode::cListIndexOf>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "contains"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
-        emit<OpCode::cListContains>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "remove"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
-        emit<OpCode::cListRemove>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "removeAll"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        mCtx.mBackend.mKeyOpsTable.addType(listType->mElement);
-        emit<OpCode::cListRemoveAll>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "clear"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListClear>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "reserve"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListReserve>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "resize"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
-            visit(node->mArgs[1].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cListResize>(static_cast<OpWordCount>(elementWords));
-        return true;
-    }
-
-    return false;
-}
-
-bool CodeGenVisitor::emitMapMethodCall(FunctionCallNode* node, MemberAccessNode* memberAccess)
-{
-    auto* mapType = static_cast<MapType*>(memberAccess->mReceiver->mResolvedType);
-    u32 valueWords = layout::getWordSizeForType(mapType->mValue);
-
-    if (identifierEquals(memberAccess->mMember, "getKeys"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapGetKeys>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "getValues"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapGetValues>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "size"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapSize>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "isEmpty"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapIsEmpty>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "clear"))
-    {
-        if (visit(memberAccess->mReceiver) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapClear>();
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "containsKey"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        // Here, we are only interested in the key and so we don't have a value field offset or value words.
-        emit<OpCode::cMapContainsKey>(getMapAccessIndex(mapType, 0, 0));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "tryGet"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
-            emitAddress(node->mArgs[1].mValue, AddressMode::cStorage) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapTryGet>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "get"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cLoadMapValue>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "set"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false ||
-            visit(node->mArgs[1].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cStoreMapValue>(getMapAccessIndex(mapType, 0, static_cast<OpWordCount>(valueWords)));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "remove"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        // Here, we are only interested in the key and so we don't have a value field offset or value words.
-        emit<OpCode::cMapRemove>(getMapAccessIndex(mapType, 0, 0));
-        return true;
-    }
-
-    if (identifierEquals(memberAccess->mMember, "reserve"))
-    {
-        if (visit(memberAccess->mReceiver) == false || visit(node->mArgs[0].mValue) == false)
-        {
-            return false;
-        }
-
-        emit<OpCode::cMapReserve>();
-        return true;
-    }
-
+    SIMLANG_BREAK("Invalid collection method during code generation.");
     return false;
 }
 
